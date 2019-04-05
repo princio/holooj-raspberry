@@ -1,0 +1,8 @@
+debug/
+.vscode/
+main_prova/
+out.txt
+yolo/
+*.out
+MakefileUno
+mov1.cpp
