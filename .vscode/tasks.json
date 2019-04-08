@@ -1,0 +1,52 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g",
+                "-std=c++11",
+                "mov1.cpp",
+                "fp16.c",
+                "image.c",
+                "detect_boxes_v2.c",
+                "-o",
+                "debug/mov1",
+                "-L/usr/local/lib",
+                "-lmvnc",
+                "-lopencv_core",
+                "-lopencv_imgproc",
+                "-lopencv_highgui"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "rm",
+            "args": [
+                "debug/mov1"
+            ]
+        },
+        {
+            "label": "make",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "all"
+            ]
+        },
+        {
+            "label": "make test",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "-n"
+            ]
+        }
+    ]
+}

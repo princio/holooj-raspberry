@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "detect_boxes.h": "c",
+        "iostream": "cpp",
+        "time.h": "c",
+        "highgui.hpp": "c",
+        "mvnc.h": "c",
+        "system_error": "c",
+        "darknet_region_layer.h": "c",
+        "string.h": "c",
+        "float.h": "c",
+        "cfloat": "c",
+        "socket.h": "c",
+        "turbojpeg.h": "c",
+        "movidius.h": "c",
+        "stdlib.h": "c"
+    }
+}
