@@ -12,10 +12,16 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 #include <mvnc.h>
+
+#ifdef NCS
+#include <mvnc.h>
+#endif
 
 #include "movidius.h"
 #include "yolo.h"
+#include "socket.h"
 
 // network image resolution
 #define MOV_IM_W 416
@@ -34,12 +40,14 @@ typedef unsigned short half_float;
 const unsigned int MAX_PATH = 256;
 
 /** NCS **/
+#ifdef NCS
 uint32_t numNCSConnected = 0;
 ncStatus_t retCode;
-struct ncDeviceHandle_t* dev_handle[MAX_NCS_CONNECTED];
+struct ncDeviceHandle_t* ncs_dev_handle;
 struct ncGraphHandle_t* ncs_graph_handle = NULL;
 struct ncFifoHandle_t* ncs_fifo_in = NULL;
 struct ncFifoHandle_t* ncs_fifo_out = NULL;
+#endif
 
 /** DARKNET */
 detection *dets;
@@ -49,6 +57,8 @@ const char categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0t
 // char *names[80];
 int names[80];
 
+
+#ifdef NCS
 /**
  * @brief read_graph_from_file
  * @param graph_filename [IN} is the full path (or relative) to the graph file to read.
@@ -95,14 +105,9 @@ int read_graph_from_file(const char *graph_filename, unsigned int *length_read, 
     return 0;
 }
 
-int ncs_init(){
-    for (int i = 0; i < MAX_NCS_CONNECTED; i++) {
-        ncDeviceCreate(i, &dev_handle[i]);
-
-        retCode = ncDeviceOpen(dev_handle[i]);
-
-        if(!retCode) numNCSConnected++;
-    }
+int ncs_init() {
+    if(ncDeviceCreate(0, &ncs_dev_handle) != NC_OK) return -1;
+    if(ncDeviceOpen(ncs_dev_handle) != NC_OK) return -1;
     return 0;
 }
 
@@ -110,13 +115,7 @@ int ncs_load_nn(){
     
     char yolo_graph_filename[MAX_PATH];
     unsigned int yolo_graph_len = 0;
-    int dev_index = 0;
     void *yolo_graph_buf;
-
-
-    if (numNCSConnected > 1) {
-        dev_index = 1;
-    }
 
 
     strncpy(yolo_graph_filename, YOLO_GRAPH_DIR, MAX_PATH);
@@ -129,13 +128,12 @@ int ncs_load_nn(){
     if ((retCode = ncGraphCreate("yoloGraph", &ncs_graph_handle))) return retCode;
 
 
-    retCode = ncGraphAllocateWithFifosEx(dev_handle[dev_index], ncs_graph_handle, yolo_graph_buf, yolo_graph_len,
+    retCode = ncGraphAllocateWithFifosEx(ncs_dev_handle, ncs_graph_handle, yolo_graph_buf, yolo_graph_len,
                                         &ncs_fifo_in, NC_FIFO_HOST_WO, 2, NC_FIFO_FP32,
                                         &ncs_fifo_out, NC_FIFO_HOST_RO, 2, NC_FIFO_FP32);
     
     return 0;
 }
-
 
 int ncs_inference() {
 
@@ -163,6 +161,8 @@ int ncs_inference() {
 
     return retCode;
 }
+#endif
+
 
 
 void darknet_init () {
@@ -184,7 +184,6 @@ void darknet_init () {
     yolo_n = 5;
     yolo_coords = 4;
     yolo_classes = 80;
-    yolo_biases = (float*) calloc(yolo_n*2, sizeof(float));
     yolo_biases[0] = 0.57273;
     yolo_biases[1] = 0.677385;
     yolo_biases[2] = 1.87446;
@@ -228,25 +227,28 @@ int mov_inference(float *output, int *output_size, float thresh) {
     fclose(f);
 #endif
 
+
+    float c = clock();
     get_bboxes(thresh);
     
     for(int n = 0; n < yolo_nboxes; n++) {
         for(int k = 0; k < yolo_classes; k++) {
             if (yolo_dets[n].prob[k] > .5){
                 detection d = yolo_dets[n];
+                box b = d.bbox;
 
 
                 printf("\n\n%2d|%2d\t%7.6f\t\t", n, k, d.prob[k]);
-                box b = d.bbox;
                 printf("(%7.6f, %7.6f, %7.6f, %7.6f)\n", b.x, b.y, b.w, b.h);
 
-                output[0] = d.prob[k];
-                memcpy(output+1, &(b), sizeof(box));
+                output[4] = d.objectness;
+                output[5] = d.prob[k];
+                memcpy(output, &(b), sizeof(box));
 
                 const char *c = &categories[names[k]];
                 int lc = strlen(c);
-                memcpy(&output[5], &lc, 4);
-                memcpy(&output[6], c, lc);
+                memcpy(&output[6], &lc, 4);
+                memcpy(&output[7], c, lc);
 
                 // printf("%2d|%2d|%2d\t%2d\t%7.6f\t\t", i, j, n, k, yolo_dets[id].prob[k]);
                 // box b = yolo_dets[id].bbox;
@@ -257,6 +259,10 @@ int mov_inference(float *output, int *output_size, float thresh) {
             }
         }
     }
+
+    c = clock() - c;
+
+    printf("\n-->took %f seconds to execute \n", ((double) (c)) / CLOCKS_PER_SEC); 
     return 0;
 }
 
@@ -276,11 +282,17 @@ int mov_init () {
 }
 
 void mov_destroy() {
+    for(int i = yolo_nboxes-1; i >= 0; --i){
+        free(yolo_dets[i].prob);
+    }
+    free(yolo_output);
+    free(yolo_input);
+    free(yolo_dets);
+#ifdef NCS
     ncFifoDestroy(&ncs_fifo_in);
     ncFifoDestroy(&ncs_fifo_out);
-    for (int i = 0; i < (int) numNCSConnected; i++) {
-        ncDeviceClose(dev_handle[i]);
-        ncDeviceDestroy(&dev_handle[i]);
-    }
+    ncDeviceClose(ncs_dev_handle);
+    ncDeviceDestroy(&ncs_dev_handle);
+#endif
 }
 

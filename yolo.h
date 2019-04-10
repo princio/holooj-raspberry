@@ -24,7 +24,7 @@ int yolo_classes;
 int yolo_coords;    //number of coordinates required by a bounding box
 int yolo_n;         // bounding box to detect number
 int yolo_outputs;
-float * yolo_biases; 
+float yolo_biases[20]; 
 
 int yolo_image_w;
 int yolo_image_h;
