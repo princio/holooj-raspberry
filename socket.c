@@ -38,6 +38,7 @@ typedef struct Config {
 
 Config config;
 
+int socket_errno;
 int buffer_size;
 int image_size;
 int sockfd_server;
@@ -59,9 +60,9 @@ int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int ind
 int get_address(in_addr_t *addr, char *iface) {
 
 	struct ifaddrs *ifaddr, *ifa;
-	test_return(getifaddrs(&ifaddr) == -1, StsError, "Socket creation failed.");
+	RIFE(getifaddrs(&ifaddr) == -1, SO, Addr, "");
 
-   for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		int condition = !strcmp(ifa->ifa_name, iface) && ifa->ifa_addr && (ifa->ifa_addr->sa_family == AF_INET);
 	    if (condition) {
 			printf("addr = %s\n", inet_ntoa(((struct sockaddr_in *)ifa->ifa_addr)->sin_addr));
@@ -70,33 +71,27 @@ int get_address(in_addr_t *addr, char *iface) {
 	    }
 	}
 	freeifaddrs(ifaddr);
+
 	return 0;
 }
 
 
-int socket_init() {
-
-#ifdef TCP
+int socket_start_server() {
 	sockfd_server = socket(AF_INET, SOCK_STREAM, 0);
-#else
-	sockfd_server = socket(AF_INET, SOCK_DGRAM, 0);
-#endif
 
-	test_return(sockfd_server < 0, sockfd_server, "Socket creation failed.");
+	RIFE(sockfd_server, SO, Creation, "");
 
 	addr.sin_addr.s_addr = INADDR_ANY;
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(PORT_IN);
 
+	ifget_address(&addr.sin_addr.s_addr, iface);
 
-	get_address(&addr.sin_addr.s_addr, iface);
-
-	// Forcefully attaching socket to the port PORTIN
-	test_return(bind(sockfd_server, (struct sockaddr *)&addr, sizeof(addr))<0, sockfd_server, "Bind failed.");
+	RIFE(bind(sockfd_server, (struct sockaddr *) &addr, sizeof(addr)), SO, Bind, "");
 
 	printf("start listening on port %d.\n", PORT_IN);
 
-	test_return(listen(sockfd_server, 3) < 0, sockfd_server, "Listening error.");
+	RIFE(listen(sockfd_server, 3), SO, Listening, "");
 
 	return 0;
 }
@@ -109,15 +104,21 @@ int socket_wait_connection() {
 	
 	printf("waiting new connection...");
 	sockfd_read = accept(sockfd_server, (struct sockaddr *)&addr, (socklen_t*)&addrlen);
-	test_return(sockfd_read < 0, sockfd_read, "Error during accepting.");
+	RIFE(sockfd_read, SO, Accept, "");
 	printf("Connected!\n");
 
 	ufds[0].fd = sockfd_read;
 	ufds[0].events = POLLIN | POLLPRI; // check for normal or out-of-band
+}
 
-	// setsockopt(sockfd_read, SOL_SOCKET, SO_RCVTIMEO,(struct timeval *)&tv, sizeof(struct timeval));
 
-	recv(sockfd_read, &config, sizeof(Config), 0); //REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
+int socket_recv_config() {
+	int ret;
+
+	if(socket_wait_data()) return -1;
+
+	ret = recv(sockfd_read, &config, sizeof(Config), 0); //REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
+	RIFE(ret <= 0, SO, Recv, "(%d)", ret);
 
 	printf("%s\t%dx%d, %d\n", config.hello, config.width, config.height, config.isBMP);
 
@@ -129,17 +130,14 @@ int socket_wait_connection() {
 	return 0;
 }
 
-int socket_check_connection() {
 
+int socket_wait_data() {
 	int rv = poll(ufds, 1, 100);
-
-	test_return(rv == -1, SockPoolError, "Polling: some error [errno=%d].", errno);
-
-	test_return(rv == 0, SockPoolTimeout, "Pooling: timeout occurred, no data after 100 ms.\n");
-
-	// if(ufds[0].revents | POLLIN)
-	//   printf("Pooling: POLLIN ok.\n");
+	RIFE(rv == -1, Poll, Generic, "");
+	if(rv==0) ++timeouts;
+	RIFE(rv == 0,  Poll, Timeout, "");
 	return 0;
+	// if(ufds[0].revents | POLLIN) printf("Pooling: POLLIN ok.\n");
 }
 
 
@@ -152,37 +150,30 @@ int socket_receiving() {
 	byte sbuffer[100];
 
 	printf("Receiving started.\n");
-
-	printf("Receiving...");
 	while(1) {
 		int rl;
 
-		switch(socket_check_connection()) {
-			case 0:
-			break;
-			case SockPoolError:
-				return SockPoolError;
-			case SockPoolTimeout:
-				if(++timeouts < 100) continue;
-				return SockPoolTimeout;
-		}
+		if(socket_wait_data()) return -1;
 
 		rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
 		if(rl > 0) {
 			int sl;
 
 			printf("get %d bytes.\n", rl);
-
 			printf("%hhu %hhu %hhu %hhu\n", rbuffer[0], rbuffer[1], rbuffer[2], rbuffer[3]);
 			
-			if(!elaborate_packet(rbuffer, rl, sbuffer, &sl)) {
-				if((sl = send(sockfd_read, sbuffer, sl, 0)) <= 0) {
-					ERROR("Sending error (sent %d)", sl);
-				}
+			if(elaborate_packet(rbuffer, rl, sbuffer, &sl)) {
+				memcpy(&sbuffer[4], -1, 4); // if there is some error index is set to -1.
+			} else {
+				sl = send(sockfd_read, sbuffer, sl, 0);
 			}
 
-		} else{
-			test_return(rl < 0, SockRecvError, "Receiving error (%d)", errno);
+
+			RIFE(sl, SO, Send, "(%d)", sl);
+		} else if(rl == 0) {
+			printf("[Warning %s::%d]: recv return 0.", __FILE__, __LINE__);
+		} else {
+			RIFE(rl < 0, SO, Recv, "");
 		} 
 	}
 }
@@ -193,32 +184,32 @@ int elaborate_packet(byte *packet, int rl, byte *sbuffer, int *sl) {
 	int l, index;
 
 	int stx = (int) *((int*) packet);
-	test_return(stx != STX, PckSTX, "Wrong STX (%d != %d).", stx, STX);
+	RIFE(stx != STX, Pck, STX, "(%d != %d).", stx, STX);
 
 	l = *((int*) &packet[4]);
 
-	test_return(l + OH_SIZE > rl, PckSmall, "Packet too small: received %d.", rl);
+	RIFE(l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", l + OH_SIZE, rl);
 
 	index = *((int*) &packet[8]);
 	printf("Size of %d bytes, index=%d", l, index);
 
 	memcpy(sbuffer, &STX, 4);
-	memcpy(&sbuffer[8], &packet[8], 4); //index
+	memcpy(&sbuffer[8], &index, 4); //index
 
 	return elaborate_image(packet + OH_SIZE, rl - OH_SIZE, &sbuffer[12], (int*) &sbuffer[4], index);
 }
 
 
 int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int index) {
-	int w, h, ss, cl;
+	int w, h, ss, cl, ret;
 
 	unsigned char im[image_size];
 
 	if(!config.isBMP) {
 		tjhandle tjh = tjInitDecompress();
+		
 		if(tjDecompressHeader3(tjh, imbuffer, iml, &w, &h, &ss, &cl)) {
-			printf("\n%s\n", tjGetErrorStr());
-			return -1;
+			RIFE(1, Tj, Header, "(%s)", tjGetErrorStr());
 		}
 		switch(cl) {
 			case TJCS_CMYK: printf("CMYK"); break;
@@ -227,33 +218,36 @@ int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int ind
 			case TJCS_YCbCr: printf("YCbCr"); break;
 			case TJCS_YCCK: printf("YCCK"); break;
 		}
-		tjDecompress2(tjh, imbuffer, iml, im, 0, 0, 0, TJPF_RGB, 0);
-		tjDestroy(tjh);
+		ret = tjDecompress2(tjh, imbuffer, iml, im, 0, 0, 0, TJPF_RGB, 0);
+		RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
+		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
+
 		char filename[30];
 		sprintf(filename, "../ph_%d.bmp", index);
 		FILE *f = fopen(filename, "wb");
-		fwrite(imbuffer, 1, iml, f);
-		fclose(f);
+		RIFE(!f, Gen, _, "(fopen error)");
+		int ret = fwrite(imbuffer, 1, iml, f);
+		RIFE(ret < iml, Gen, _, "(fwrite error: %d instead of %d)", ret, iml);
+		RIFE(fclose(f), Gen, _, "(fclose error)");
 	}
 	else {
 		unsigned long imjl = 65000;
 		byte *imj = tjAlloc((int) imjl);
 		tjhandle tjh = tjInitCompress();
-		int ret = tjCompress2(tjh, imbuffer, 416, 0, 416, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
-		test(ret < 0, ImTjError, "Error during compressing.");
-		tjDestroy(tjh);
+		ret = tjCompress2(tjh, imbuffer, 416, 0, 416, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
+		RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
+		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
+
 		char filename[30];
 		sprintf(filename, "../ph_%d.jpg", index);
 		FILE *f = fopen(filename, "wb");
-		test(!f, 0, "Error during file <%s> opening.", filename);
-		int fw = fwrite(imj, 1, imjl, f);
-		test(fw < imjl, 0, "Error during file writing: %d < %lu", fw, imjl);
-		fclose(f);
+		RIFE(!f, Gen, _, "(fopen error)");
+		ret = fwrite(imbuffer, 1, imjl, f);
+		RIFE(ret < imjl, Gen, _, "(fwrite error: %d instead of %lu)", ret, imjl);
+		RIFE(fclose(f), Gen, _, "(fclose error)");
 	}
 
-    if(iml != yolo_input_size) {
-        return -1;
-    }
+	RIFE(iml != yolo_input_size, Im, WrongSize, "(%d != %d)", iml, yolo_input_size);
 
 	int i = 0;
 	while(i <= (iml-3)) {
@@ -266,7 +260,8 @@ int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int ind
 	// X[i] = imbuffer[i] / 255.;   ++i;
 	// X[i] = imbuffer[i-2] / 255.; ++i;
 
-	int a = mov_inference((float *) bbox_buffer, bl, thresh);
+	ret = mov_inference((float *) bbox_buffer, bl, thresh);
+	if(ret) return ret;
 
     // printf("%d#%s\t(%7.6f, %7.6f, %7.6f, %7.6f, %7.6f)\n", *(int*) &bbox_buffer[20], (char*) &bbox_buffer[24], *(float*)&bbox_buffer[0], *(float*)&bbox_buffer[4], *(float*)&bbox_buffer[8], *(float*)&bbox_buffer[12], *(float*)&bbox_buffer[16]);
     // printf("x=%7.6f y=%7.6f w=%7.6f h=%7.6f\tobj=%7.6f cls=%7.6f\t%d, %s\n",
@@ -276,7 +271,8 @@ int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int ind
 		*(float*)&bbox_buffer[8],  *(float*)&bbox_buffer[12],
 		*(float*)&bbox_buffer[16], *(float*)&bbox_buffer[20],
 		*(int*)&bbox_buffer[24],   (char*)&bbox_buffer[28]);
-	return a;
+	
+	return 0;
 }	
 
 
@@ -317,13 +313,19 @@ int main( int argc, char** argv )
 	}
 	printf("<<%s>>.\n", iface);
 
-    if(socket_init()) {
+    if(socket_start_server()) {
 		exit(1);
 	}
 
 	while(1) {
-		socket_wait_connection();
-		socket_receiving();
+		if(socket_start_server())    exit(socket_errno);
+
+		if(socket_wait_connection()) exit(socket_errno);
+
+		if(socket_recv_config())     exit(socket_errno);
+
+		if(socket_receiving()) 		 exit(socket_errno);
+
 		if(!close(sockfd_read)) {
 			printf("\nError during closing [errno=%d].\n", errno);
 			exit(1);

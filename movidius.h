@@ -5,7 +5,6 @@
 
 #define ASS(A,B) if((A)) return error_code = (B)
 
-typedef unsigned char byte;
 
 typedef enum {
     MOV_OK = 0,
