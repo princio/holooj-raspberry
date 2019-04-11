@@ -186,6 +186,9 @@ void darknet_init () {
     }
 
     /** LAYER **/
+    yolo_image_w = 416;
+    yolo_image_h = 416;
+    yolo_image_c = 3;
     yolo_w = 13;
     yolo_h = 13;
     yolo_n = 5;
@@ -222,7 +225,7 @@ void darknet_init () {
 /**
  * @return -1 if error; 0 if no bbox has found; x>0 if it found x bbox.
  * */ 
-int mov_inference(float *output, int *output_size, float thresh) {
+int mov_inference(detection2 *output, float thresh) {
 
 #ifdef NCS
     if(ncs_inference()) return -1;
@@ -240,42 +243,32 @@ int mov_inference(float *output, int *output_size, float thresh) {
     float c = clock();
     get_bboxes(thresh);
     
-    int bbox_founded = 0;
+    int nbbox = 0;
     for(int n = 0; n < yolo_nboxes; n++) {
         for(int k = 0; k < yolo_classes; k++) {
             if (yolo_dets[n].prob[k] > .5){
                 detection d = yolo_dets[n];
                 box b = d.bbox;
-
-
-                printf("\n\n%2d|%2d\t%7.6f\t\t", n, k, d.prob[k]);
-                printf("(%7.6f, %7.6f, %7.6f, %7.6f)\n", b.x, b.y, b.w, b.h);
-
-                output[4] = d.objectness;
-                output[5] = d.prob[k];
-                memcpy(output, &(b), sizeof(box));
-
                 const char *c = &categories[names[k]];
                 int lc = strlen(c);
-                memcpy(&output[6], &lc, 4);
-                memcpy(&output[7], c, lc);
 
-                // printf("%2d|%2d|%2d\t%2d\t%7.6f\t\t", i, j, n, k, yolo_dets[id].prob[k]);
-                // box b = yolo_dets[id].bbox;
-                // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\n", b.x, b.y, b.w, b.h);
 
-                *output_size = 5*4+lc;
+                // printf("\n\n%2d|%2d\t%7.6f\t", n, k, d.prob[k]);
+                // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\t\t%s\n", b.x, b.y, b.w, b.h, c);
 
-                ++bbox_founded;
-                break;
+                memcpy(&output[nbbox].bbox, &(b), 16);    //BBOX
+                output[nbbox].objectness = d.objectness;  //OBJ
+                output[nbbox].prob = d.prob[k];           //Classness
+                memcpy(&output[nbbox].name, c, lc);    //BBOX
+
+                if(++nbbox == 5) return nbbox;
             }
         }
     }
+    return nbbox;
 
     c = clock() - c;
     // printf("\n-->took %f seconds to execute \n", ((double) (c)) / CLOCKS_PER_SEC); 
-
-    return bbox_founded;
 }
 
 

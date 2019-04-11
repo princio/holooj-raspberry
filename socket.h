@@ -1,14 +1,39 @@
 #ifndef __SOCKET_H__
 #define __SOCKET_H__
 
-
+#include "yolo.h"
 #define NCS
-
-#define ERROR(M1, V1, M2, V2) extern error M1##M2##Error;
-
 
 typedef unsigned char byte;
 typedef const int error;
+
+typedef struct detection2{
+    box bbox;
+    float prob;
+    float objectness;
+    char name[28];
+} detection2;
+
+typedef struct _RecvBuffer
+{
+    int stx;
+    int index;
+    int l;
+    byte image[];
+} RecvBuffer;
+
+typedef struct _SendBuffer
+{
+    int stx;
+    int index;
+    int n;
+    detection2 dets[5];
+} SendBuffer;
+
+
+
+#define ERROR(M1, V1, M2, V2) extern error M1##M2##Error;
+
 extern error SOError;
 extern error PollError;
 extern error PckError;

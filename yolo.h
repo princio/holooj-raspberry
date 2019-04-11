@@ -28,6 +28,7 @@ float yolo_biases[20];
 
 int yolo_image_w;
 int yolo_image_h;
+int yolo_image_c;
 
 int yolo_nboxes;
 
