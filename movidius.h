@@ -16,7 +16,7 @@ int nc_error_code;
 
 int mov_init();
 
-int mov_inference(detection2 *output, float thresh);
+int mov_inference(detection2 *dets2, float thresh);
 
 int mov_destroy();
 

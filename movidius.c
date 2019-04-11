@@ -225,7 +225,7 @@ void darknet_init () {
 /**
  * @return -1 if error; 0 if no bbox has found; x>0 if it found x bbox.
  * */ 
-int mov_inference(detection2 *output, float thresh) {
+int mov_inference(detection2 dets2[5], float thresh) {
 
 #ifdef NCS
     if(ncs_inference()) return -1;
@@ -248,6 +248,7 @@ int mov_inference(detection2 *output, float thresh) {
         for(int k = 0; k < yolo_classes; k++) {
             if (yolo_dets[n].prob[k] > .5){
                 detection d = yolo_dets[n];
+                detection2 *d2 = &dets2[nbbox];
                 box b = d.bbox;
                 const char *c = &categories[names[k]];
                 int lc = strlen(c);
@@ -256,11 +257,11 @@ int mov_inference(detection2 *output, float thresh) {
                 // printf("\n\n%2d|%2d\t%7.6f\t", n, k, d.prob[k]);
                 // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\t\t%s\n", b.x, b.y, b.w, b.h, c);
 
-                memcpy(&output[nbbox].bbox, &(b), 16);    //BBOX
-                output[nbbox].objectness = d.objectness;  //OBJ
-                output[nbbox].prob = d.prob[k];           //Classness
-                memcpy(&output[nbbox].name, c, lc);    //BBOX
-
+                memcpy(&(d2->bbox), &(b), 16);    //BBOX
+                d2->objectness = d.objectness;  //OBJ
+                d2->prob = d.prob[k];           //Classness
+                memcpy(&(d2->name), c, lc);    //BBOX
+                d2->name[lc] = 0;
                 if(++nbbox == 5) return nbbox;
             }
         }

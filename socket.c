@@ -114,8 +114,8 @@ ERROR(  Mov,     7,     TooFewBytes,     2);
 
 
 
-int elaborate_packet(RecvBuffer *rbuffer, int rl, SendBuffer *sbuffer, int *sl);
-int elaborate_image(byte *imbuffer, int iml, detection2 *dets, int index);
+int elaborate_packet(RecvBuffer *rbuffer, int rl, SendBuffer *sbuffer);
+int elaborate_image(byte *imbuffer, int iml, detection2 dets[5], int index);
 int socket_wait_data(int rec);
 
 
@@ -226,10 +226,10 @@ int socket_receiving() {
 		if(!socket_wait_data(RECV)) {
 			rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
 			if(rl > 0) {
-				int sl;
-				if(!elaborate_packet(rbuffer, rl, &sbuffer, &sl)) {
+				int nbbox = elaborate_packet(rbuffer, rl, &sbuffer);
+				if(nbbox >= 0) {
 					if(!socket_wait_data(SEND)) {
-						sl = send(sockfd_read, &sbuffer, 4 + 4 + 32, 0);
+						int sl = send(sockfd_read, &sbuffer, 8 + nbbox*sizeof(detection2), 0);
 						if(sl <= 0) {
 							printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno),sl);
 							socket_errno = SOSendError;
@@ -249,30 +249,27 @@ int socket_receiving() {
 }
 
 
-int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer, int *sl) {
+int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
 
-	int index, ret;
+	int ret;
 
 	RIFE(packet->stx != STX, Pck, STX, "(%d != %d).", packet->stx, STX);
 
 
 	RIFE(packet->l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", packet->l + OH_SIZE, rl);
 
-	index = packet->index;
 	printf("Size of %d bytes, index=%d\r", packet->l, packet->index);
 
 	sbuffer->stx = STX;
-	
+	sbuffer->index = packet->index;
+	sbuffer->n = elaborate_image(packet->image, packet->l, sbuffer->dets, sbuffer->index);
 
-	sbuffer->n = elaborate_image(packet->image, packet->l, sbuffer->dets, index);
-	if(sbuffer->n < 0) return -1;
-
-	return 0;
+	return sbuffer->n;
 }
 
 
-int elaborate_image(byte *imbuffer, int iml, detection2 *dets, int index) {
-	int w, h, ss, cl, ret;
+int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
+	int w, h, ss, cl, ret, nbbox;
 
 	unsigned char im[image_size];
 
@@ -292,16 +289,79 @@ int elaborate_image(byte *imbuffer, int iml, detection2 *dets, int index) {
 		ret = tjDecompress2(tjh, imbuffer, iml, im, 0, 0, 0, TJPF_RGB, 0);
 		RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
 		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
-
-		char filename[30];
-		sprintf(filename, "./phs/ph_%d.bmp", index);
-		FILE *f = fopen(filename, "wb");
-		RIFE(!f, Gen, _, "(fopen error)");
-		int ret = fwrite(imbuffer, 1, iml, f);
-		RIFE(ret < iml, Gen, _, "(fwrite error: %d instead of %d)", ret, iml);
-		RIFE(fclose(f), Gen, _, "(fclose error)");
 	}
-	else {
+
+	// RIFE(iml != yolo_input_size, Im, WrongSize, "(%d != %d)", iml, yolo_input_size);
+
+#ifndef MOV
+	return 0;
+#endif
+	int i = 0;
+	int letter_box_image_first_pixel = 3*config.width*(yolo_image_h - config.height) >> 1;
+	float *_yolo_input = &yolo_input[letter_box_image_first_pixel];
+	while(i <= (iml-3)) {
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;
+	}
+
+	// X[i] = imbuffer[i+2] / 255.; ++i;
+	// X[i] = imbuffer[i] / 255.;   ++i;
+	// X[i] = imbuffer[i-2] / 255.; ++i;
+	nbbox = mov_inference(dets2, thresh);
+	w = config.width;
+	h = yolo_image_h - config.height;
+	for(i = nbbox-1; i >= 0; --i) {
+		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
+			index, nbbox - i,
+			dets2[i].bbox.x, dets2[i].bbox.y, dets2[i].bbox.w, dets2[i].bbox.h, dets2[i].objectness, dets2[i].prob, dets2[i].name);
+
+		box b = dets2[i].bbox;
+
+		int left  = (b.x-b.w/2.)*config.width;
+		int right = (b.x+b.w/2.)*config.width;
+		int top   = (b.y-b.h/2.)*h;
+		int bot   = (b.y+b.h/2.)*h;
+
+		byte r = 50 * (i % 1);
+		byte g = 50 * (i % 2);
+		byte blue = 50 * (i % 3);
+
+		if(left < 0) left = 0;
+		if(right > config.width-1) right = config.width-1;
+		if(top < 0) top = 0;
+		if(bot > h-1) bot = h-1;
+
+		byte *_im = &imbuffer[letter_box_image_first_pixel];
+		int top_line_pixel = 3*top*config.width;
+		int bot_line_pixel = 3*bot*config.width;
+		int first_pixel_left = 3*left;
+		int first_pixel_right = 3*right;
+    for(int k = first_pixel_left; k <= first_pixel_right; k+=3){
+			_im[k + top_line_pixel + 0] = r;
+			_im[k + top_line_pixel + 1] = g;
+			_im[k + top_line_pixel + 2] = blue;
+
+
+			_im[k + bot_line_pixel + 0] = r;
+			_im[k + bot_line_pixel + 1] = g;
+			_im[k + bot_line_pixel + 2] = blue;
+    }
+    for(int k = top; k <= bot; k+=3) {
+			int line_pixel = 3*k*config.width;
+			_im[first_pixel_left  + line_pixel + 0] = r;
+			_im[first_pixel_right + line_pixel + 0] = r;
+
+			_im[first_pixel_left  + line_pixel + 1] = g;
+			_im[first_pixel_right + line_pixel + 1] = g;
+
+			_im[first_pixel_left  + line_pixel + 2] = blue;
+			_im[first_pixel_right + line_pixel + 2] = blue;
+    }
+	}
+	printf("\n");
+
+	if(nbbox > 0) {
 		unsigned long imjl = 200000;
 		byte *imj = tjAlloc((int) imjl);
 		tjhandle tjh = tjInitCompress();
@@ -318,29 +378,7 @@ int elaborate_image(byte *imbuffer, int iml, detection2 *dets, int index) {
 		RIFE(fclose(f), Gen, _, "(fclose error)");
 	}
 
-	// RIFE(iml != yolo_input_size, Im, WrongSize, "(%d != %d)", iml, yolo_input_size);
-
-#ifndef MOV
-	return 0;
-#endif
-	int i = 0;
-	float *_yolo_input = &yolo_input[(yolo_image_h - config.height) >> 1];
-	while(i <= (iml-3)) {
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
-	}
-
-	// X[i] = imbuffer[i+2] / 255.; ++i;
-	// X[i] = imbuffer[i] / 255.;   ++i;
-	// X[i] = imbuffer[i-2] / 255.; ++i;
-	ret = mov_inference(dets, thresh);
-	for(i = ret; i >= 0; --i) {
-		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
-			index, ret - i,
-			dets->bbox.x, dets->bbox.y, dets->bbox.w, dets->bbox.h, dets->objectness, dets->prob, dets->name);
-	}
-	return ret;
+	return nbbox;
 }	
 
 
@@ -348,10 +386,10 @@ int main( int argc, char** argv )
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	if(socket_start_server()) exit(socket_errno);
 #ifdef MOV
 	if(mov_init()) exit(movidius_errno);
 #endif
+	if(socket_start_server()) exit(socket_errno);
 #ifndef NCS
 	FILE*f = fopen("/home/developer/dog.jpg", "rb");
 	fseek(f, 0, SEEK_END);
