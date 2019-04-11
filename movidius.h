@@ -3,27 +3,22 @@
 
 #define NCS2
 
-#define ASS(A,B) if((A)) return error_code = (B)
+#define RIFEM( expr, mask, code, msg, ... )\
+    if((expr)) {\
+        printf("\n[%s::%d]\t"#mask" "#code"\t(ncscode=%d)"msg".\n\n", __FILE__, __LINE__, retCode, ##__VA_ARGS__);\
+        movidius_errno = mask##code##Error;\
+        return -1;\
+    }
 
 
-typedef enum {
-    MOV_OK = 0,
-    MOV_GRAPH_OPEN = -5,
-    MOV_GRAPH_ALLC_BUFFER = -6,
-    MOV_GRAPH_READ = -7,
-    MOV_INIT_NOTFOUND = -8,
-    MOV_INIT_NOTOPEN = -9
-} movStatus_t;
-
-
-int error_code;
+int movidius_errno;
 int nc_error_code;
 
 int mov_init();
 
 int mov_inference(float *output, int *output_size, float thresh);
 
-void mov_destroy();
+int mov_destroy();
 
 
 #endif //__MOVIDIUS_H__

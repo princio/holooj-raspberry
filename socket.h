@@ -4,64 +4,66 @@
 
 #define NCS
 
-#define ERROR(M1, V1, M2, V2) error M1##M2##Error = V1 | 1 << (8+V2);
+#define ERROR(M1, V1, M2, V2) extern error M1##M2##Error;
 
 
 typedef unsigned char byte;
 typedef const int error;
+extern error SOError;
+extern error PollError;
+extern error PckError;
+extern error TjError;
+extern error ImError;
+extern error NCSError;
+extern error MovError;
 
 
-error Gen_Error = INT32_MAX;
-error SO=    1;
-error Poll=  2;
-error Pck=   4;
-error Tj=    8;
-error Im=    16;
-error Im=    16;
+extern error SOCreationError;
+extern error SOBindError;
+extern error SOListeningError;
+extern error SOAcceptError;
+extern error SOSendError;
+extern error SORecvError;
+extern error SOAddrError;
 
-ERROR(   SO,     1,     Creation,     1);
-ERROR(   SO,     1,         Bind,     2);
-ERROR(   SO,     1,    Listening,     3);
-ERROR(   SO,     1,       Accept,     4);
-ERROR(   SO,     1,         Send,     5);
-ERROR(   SO,     1,         Recv,     6);
-ERROR(   SO,     1,         Addr,     7);
+extern error PollGenericError;
+extern error PollTimeoutError;
+extern error PollRecvBusyError;
+extern error PollInError;
+extern error PollOutError;
 
-ERROR( Poll,     2,      Generic,     1);
-ERROR( Poll,     2,      Timeout,     2);
-ERROR( Poll,     2,     RecvBusy,     3);
+extern error PckErrorError;
+extern error PckSTXError;
+extern error PckTooSmallError;
 
-ERROR(  Pck,     3,        Error,     1);
-ERROR(  Pck,     3,          STX,     2);
-ERROR(  Pck,     3,     TooSmall,     3);
+extern error TjGenericError;
+extern error TjHeaderError;
+extern error TjDecompressError;
+extern error TjCompressError;
+extern error TjDestroyError;
 
-ERROR(   Tj,     4,      Generic,     1);
-ERROR(   Tj,     4,       Header,     2);
-ERROR(   Tj,     4,   Decompress,     3);
-ERROR(   Tj,     4,     Compress,     4);
-ERROR(   Tj,     4,      Destroy,     5);
+extern error ImWrongSizeError;
 
-ERROR(   Im,     5,    WrongSize,     1);
+extern error NCSDevCreateError;
+extern error NCSDevOpenError;
+extern error NCSGraphCreateError;
+extern error NCSGraphAllocateError;
+extern error NCSInferenceError;
+extern error NCSGetOptError;
+extern error NCSFifoReadError;
+extern error NCSDestroyError;
+
+extern error MovReadGraphFileError;
+extern error MovTooFewBytesError;
 
 #undef ERROR
 
 
-#define ERROR(msg, ...)\
-    printf("Error in %s::%d: "msg"\n", __FILE__, __LINE__, ##__VA_ARGS__);
-
-/** expr should not be a here defined function call **/
 #define RIFE( expr, mask, code, msg, ... )\
     if((expr)) {\
-        printf("[Error %s::%d] "#mask"-"#code" [errno=%d] "#msg".\n", mask##code##Error, __FILE__, __LINE__, errno, ##__VA_ARGS__);\
+        printf("\n[%s::%d]\t"#mask" "#code"\t(errno#%d=%s)"msg".\n\n", __FILE__, __LINE__, errno, strerror(errno), ##__VA_ARGS__);\
         socket_errno = mask##code##Error;\
         return -1;\
     }
-
-
-#define test( expr, code, msg, ... )\
-    if((expr)) {\
-        printf("[Error %d] in %s::%d: "msg"\n", code, __FILE__, __LINE__, ##__VA_ARGS__);\
-    }
-
 
 #endif

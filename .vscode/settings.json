@@ -16,6 +16,9 @@
         "stdlib.h": "c",
         "poll.h": "c",
         "errno.h": "c",
-        "errno-base.h": "c"
+        "errno-base.h": "c",
+        "yolo.h": "c",
+        "inet.h": "c",
+        "ifaddrs.h": "c"
     }
 }

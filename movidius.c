@@ -19,9 +19,9 @@
 #include <mvnc.h>
 #endif
 
+#include "socket.h"
 #include "movidius.h"
 #include "yolo.h"
-#include "socket.h"
 
 // network image resolution
 #define MOV_IM_W 416
@@ -106,8 +106,12 @@ int read_graph_from_file(const char *graph_filename, unsigned int *length_read, 
 }
 
 int ncs_init() {
-    if(ncDeviceCreate(0, &ncs_dev_handle) != NC_OK) return -1;
-    if(ncDeviceOpen(ncs_dev_handle) != NC_OK) return -1;
+    retCode = ncDeviceCreate(0, &ncs_dev_handle);
+    RIFEM(retCode, NCS, DevCreate, "");
+
+    retCode = ncDeviceOpen(ncs_dev_handle);
+    RIFEM(retCode, NCS, DevOpen, "");
+
     return 0;
 }
 
@@ -122,15 +126,19 @@ int ncs_load_nn(){
     strncat(yolo_graph_filename, "yolov2-tiny.graph", MAX_PATH);
 
 
-    if ((retCode = read_graph_from_file(yolo_graph_filename, &yolo_graph_len, &yolo_graph_buf))) return retCode;
+    retCode = read_graph_from_file(yolo_graph_filename, &yolo_graph_len, &yolo_graph_buf);
+    RIFEM(retCode, Mov, ReadGraphFile, "");
 
 
-    if ((retCode = ncGraphCreate("yoloGraph", &ncs_graph_handle))) return retCode;
+    retCode = ncGraphCreate("yoloGraph", &ncs_graph_handle);
+    RIFEM(retCode, NCS, GraphCreate, "");
 
 
     retCode = ncGraphAllocateWithFifosEx(ncs_dev_handle, ncs_graph_handle, yolo_graph_buf, yolo_graph_len,
                                         &ncs_fifo_in, NC_FIFO_HOST_WO, 2, NC_FIFO_FP32,
                                         &ncs_fifo_out, NC_FIFO_HOST_RO, 2, NC_FIFO_FP32);
+    RIFEM(retCode, NCS, GraphAllocate, "");
+
     
     return 0;
 }
@@ -141,17 +149,16 @@ int ncs_inference() {
     unsigned int returned_opt_size;
     unsigned int yolo_input_size_bytes = yolo_input_size << 2;
     retCode = ncGraphQueueInferenceWithFifoElem(ncs_graph_handle, ncs_fifo_in, ncs_fifo_out, yolo_input, &yolo_input_size_bytes, 0);
+    RIFEM(retCode, NCS, Inference, "");
 
     returned_opt_size=4;
     retCode = ncFifoGetOption(ncs_fifo_out, NC_RO_FIFO_ELEMENT_DATA_SIZE, &length_bytes, &returned_opt_size);
+    RIFEM(retCode, NCS, GetOpt, "");
 
-
-    if(length_bytes != yolo_outputs*4) {
-        printf("Error in yolo inference: too few bytes for output.");
-        return -1;
-    }
+    RIFEM(length_bytes != yolo_outputs*4, Mov, TooFewBytes, "(%d < %d)", length_bytes, yolo_outputs*4);
 
     retCode = ncFifoReadElem(ncs_fifo_out, yolo_output, &length_bytes, NULL);
+    RIFEM(retCode, NCS, FifoRead, "");
 
     // FILE*f = fopen("out.txt", "w");
     // for(int i = 0; i < yolo_outputs; i++) {
@@ -159,7 +166,7 @@ int ncs_inference() {
     // }
     // fclose(f);
 
-    return retCode;
+    return 0;
 }
 #endif
 
@@ -212,11 +219,13 @@ void darknet_init () {
     /** DETECTIONs **/
 }
 
-
+/**
+ * @return -1 if error; 0 if no bbox has found; x>0 if it found x bbox.
+ * */ 
 int mov_inference(float *output, int *output_size, float thresh) {
 
 #ifdef NCS
-    ncs_inference();
+    if(ncs_inference()) return -1;
 #else
     int i = -1;
     char s[20] = {0};
@@ -231,6 +240,7 @@ int mov_inference(float *output, int *output_size, float thresh) {
     float c = clock();
     get_bboxes(thresh);
     
+    int bbox_founded = 0;
     for(int n = 0; n < yolo_nboxes; n++) {
         for(int k = 0; k < yolo_classes; k++) {
             if (yolo_dets[n].prob[k] > .5){
@@ -255,33 +265,32 @@ int mov_inference(float *output, int *output_size, float thresh) {
                 // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\n", b.x, b.y, b.w, b.h);
 
                 *output_size = 5*4+lc;
+
+                ++bbox_founded;
                 break;
             }
         }
     }
 
     c = clock() - c;
+    // printf("\n-->took %f seconds to execute \n", ((double) (c)) / CLOCKS_PER_SEC); 
 
-    printf("\n-->took %f seconds to execute \n", ((double) (c)) / CLOCKS_PER_SEC); 
-    return 0;
+    return bbox_founded;
 }
 
 
 int mov_init () {
-    // setvbuf(stdout, NULL, _IONBF, 0);
-
-
 #ifdef NCS
-    ncs_init();
-    ncs_load_nn();
+    if(ncs_init()) return -1;
+    if(ncs_load_nn()) return -1;
 #endif
 
-    darknet_init ();
+    darknet_init();
 
     return 0;
 }
 
-void mov_destroy() {
+int mov_destroy() {
     for(int i = yolo_nboxes-1; i >= 0; --i){
         free(yolo_dets[i].prob);
     }
@@ -289,10 +298,11 @@ void mov_destroy() {
     free(yolo_input);
     free(yolo_dets);
 #ifdef NCS
-    ncFifoDestroy(&ncs_fifo_in);
-    ncFifoDestroy(&ncs_fifo_out);
-    ncDeviceClose(ncs_dev_handle);
-    ncDeviceDestroy(&ncs_dev_handle);
+    RIFEM(retCode = ncFifoDestroy(&ncs_fifo_in), NCS, Destroy, "");
+    RIFEM(retCode = ncFifoDestroy(&ncs_fifo_out), NCS, Destroy, "");
+    RIFEM(retCode = ncDeviceClose(ncs_dev_handle), NCS, Destroy, "");
+    RIFEM(retCode = ncDeviceDestroy(&ncs_dev_handle), NCS, Destroy, "");
 #endif
+    return 0;
 }
 

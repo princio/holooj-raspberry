@@ -26,6 +26,11 @@
 
 #define TCP
 
+#define RECV 1
+#define SEND 0
+
+#define RECV_CONTINUE { usleep(1000); continue; }
+
 const int STX = 767590;
 const int OH_SIZE = 12;
 
@@ -44,7 +49,8 @@ int image_size;
 int sockfd_server;
 int sockfd_read;
 struct pollfd ufds[1];
-struct sockaddr_in addr;
+struct sockaddr_in server_addr;
+struct sockaddr_in holo_addr;
 struct timeval tv;
 struct timeval select_timer;
 float thresh = 0.3;
@@ -53,14 +59,70 @@ int timeouts = 0;
 char iface[10] = "enp0s9";
 
 
+#define ERROR(M1, V1, M2, V2) const error M1##M2##Error = (1 << V1) | (1 << (16+V2));
+error Gen_Error  = INT32_MAX;
+error SOMask     = 1 <<  1;
+error PollMask   = 1 <<  2;
+error PckMask    = 1 <<  3;
+error TjMask     = 1 <<  4;
+error ImMask     = 1 <<  5;
+error NCSMask    = 1 <<  6;
+error MovMask    = 1 <<  7;
+
+
+ERROR(   SO,     1,        Creation,     1);
+ERROR(   SO,     1,            Bind,     2);
+ERROR(   SO,     1,       Listening,     3);
+ERROR(   SO,     1,          Accept,     4);
+ERROR(   SO,     1,            Send,     5);
+ERROR(   SO,     1,            Recv,     6);
+ERROR(   SO,     1,            Addr,     7);
+
+ERROR( Poll,     2,         Generic,     1);
+ERROR( Poll,     2,         Timeout,     2);
+ERROR( Poll,     2,        RecvBusy,     3);
+ERROR( Poll,     2,              In,     4);
+ERROR( Poll,     2,             Out,     5);
+
+ERROR(  Pck,     3,           Error,     1);
+ERROR(  Pck,     3,             STX,     2);
+ERROR(  Pck,     3,        TooSmall,     3);
+
+ERROR(   Tj,     4,         Generic,     1);
+ERROR(   Tj,     4,          Header,     2);
+ERROR(   Tj,     4,      Decompress,     3);
+ERROR(   Tj,     4,        Compress,     4);
+ERROR(   Tj,     4,         Destroy,     5);
+
+ERROR(   Im,     5,       WrongSize,     1);
+
+ERROR(  NCS,     6,       DevCreate,     1);
+ERROR(  NCS,     6,         DevOpen,     2);
+ERROR(  NCS,     6,     GraphCreate,     3);
+ERROR(  NCS,     6,   GraphAllocate,     4);
+ERROR(  NCS,     6,       Inference,     5);
+ERROR(  NCS,     6,          GetOpt,     6);
+ERROR(  NCS,     6,        FifoRead,     7);
+ERROR(  NCS,     6,         Destroy,     8);
+
+ERROR(  Mov,     7,   ReadGraphFile,     1);
+ERROR(  Mov,     7,     TooFewBytes,     2);
+
+#undef ERROR
+
+
+
+
+
 int elaborate_packet(byte *rbuffer, int rl, byte *sbuffer, int *sl);
 int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int index);
+int socket_wait_data();
 
 
 int get_address(in_addr_t *addr, char *iface) {
 
 	struct ifaddrs *ifaddr, *ifa;
-	RIFE(getifaddrs(&ifaddr) == -1, SO, Addr, "");
+	RIFE(-1 == getifaddrs(&ifaddr), SO, Addr, "");
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		int condition = !strcmp(ifa->ifa_name, iface) && ifa->ifa_addr && (ifa->ifa_addr->sa_family == AF_INET);
@@ -78,20 +140,19 @@ int get_address(in_addr_t *addr, char *iface) {
 
 int socket_start_server() {
 	sockfd_server = socket(AF_INET, SOCK_STREAM, 0);
+	RIFE(0>sockfd_server, SO, Creation, "");
 
-	RIFE(sockfd_server, SO, Creation, "");
+	server_addr.sin_addr.s_addr = INADDR_ANY;
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(PORT_IN);
 
-	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(PORT_IN);
+	if(get_address(&server_addr.sin_addr.s_addr, iface)) return -1;
 
-	ifget_address(&addr.sin_addr.s_addr, iface);
-
-	RIFE(bind(sockfd_server, (struct sockaddr *) &addr, sizeof(addr)), SO, Bind, "");
+	RIFE(0>bind(sockfd_server, (struct sockaddr *) &server_addr, sizeof(server_addr)), SO, Bind, "");
 
 	printf("start listening on port %d.\n", PORT_IN);
 
-	RIFE(listen(sockfd_server, 3), SO, Listening, "");
+	RIFE(0>listen(sockfd_server, 3), SO, Listening, "");
 
 	return 0;
 }
@@ -99,23 +160,25 @@ int socket_start_server() {
 
 
 int socket_wait_connection() {
-    int addrlen = sizeof(addr);
+  int addrlen = sizeof(holo_addr);
 	timeouts = 0;
 	
 	printf("waiting new connection...");
-	sockfd_read = accept(sockfd_server, (struct sockaddr *)&addr, (socklen_t*)&addrlen);
-	RIFE(sockfd_read, SO, Accept, "");
+	sockfd_read = accept(sockfd_server, (struct sockaddr *)&holo_addr, (socklen_t*)&addrlen);
+	RIFE(0 > sockfd_read, SO, Accept, "");
 	printf("Connected!\n");
 
 	ufds[0].fd = sockfd_read;
-	ufds[0].events = POLLIN | POLLPRI; // check for normal or out-of-band
+	ufds[0].events = POLLIN | POLLOUT; // check for normal or out-of-band
+
+	return 0;
 }
 
 
 int socket_recv_config() {
 	int ret;
 
-	if(socket_wait_data()) return -1;
+	if(socket_wait_data(RECV)) return -1;
 
 	ret = recv(sockfd_read, &config, sizeof(Config), 0); //REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
 	RIFE(ret <= 0, SO, Recv, "(%d)", ret);
@@ -131,20 +194,27 @@ int socket_recv_config() {
 }
 
 
-int socket_wait_data() {
+int socket_wait_data(int rec) {
 	int rv = poll(ufds, 1, 100);
 	RIFE(rv == -1, Poll, Generic, "");
 	if(rv==0) ++timeouts;
 	RIFE(rv == 0,  Poll, Timeout, "");
-	return 0;
-	// if(ufds[0].revents | POLLIN) printf("Pooling: POLLIN ok.\n");
+	if(rec) {
+		rv = ufds[0].revents | POLLIN;
+		RIFE(!rv,  Poll, In, "");
+	} else {
+		rv = ufds[0].revents | POLLOUT;
+		RIFE(!rv,  Poll, Out, "");
+	}
+	printf("%s to %s\n", !rv ? "not ready" : "ready", rec == RECV ? "receiving." : "sending.");
+	return !rv;
 }
 
 
 
 int socket_receiving() {
-	struct timespec sleep_time;
-	sleep_time.tv_nsec=1*000*000; //1 ms
+	// struct timespec sleep_time;
+	// sleep_time.tv_nsec=1*000*000; //1 ms
 
 	byte rbuffer[buffer_size];
 	byte sbuffer[100];
@@ -153,35 +223,34 @@ int socket_receiving() {
 	while(1) {
 		int rl;
 
-		if(socket_wait_data()) return -1;
-
-		rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
-		if(rl > 0) {
-			int sl;
-
-			printf("get %d bytes.\n", rl);
-			printf("%hhu %hhu %hhu %hhu\n", rbuffer[0], rbuffer[1], rbuffer[2], rbuffer[3]);
-			
-			if(elaborate_packet(rbuffer, rl, sbuffer, &sl)) {
-				memcpy(&sbuffer[4], -1, 4); // if there is some error index is set to -1.
+		if(!socket_wait_data(RECV)) {
+			rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
+			if(rl > 0) {
+				int sl;
+				if(!elaborate_packet(rbuffer, rl, sbuffer, &sl)) {
+					if(!socket_wait_data(SEND)) {
+						sl = send(sockfd_read, sbuffer, sl, 0);
+						if(sl <= 0) {
+							printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno),sl);
+							socket_errno = SOSendError;
+						}
+						else continue;
+					}
+				}
+			} else if(rl == 0) {
+				printf("[Warning %s::%d]: recv return 0.", __FILE__, __LINE__);
 			} else {
-				sl = send(sockfd_read, sbuffer, sl, 0);
+				RIFE(rl < 0, SO, Recv, "");
 			}
-
-
-			RIFE(sl, SO, Send, "(%d)", sl);
-		} else if(rl == 0) {
-			printf("[Warning %s::%d]: recv return 0.", __FILE__, __LINE__);
-		} else {
-			RIFE(rl < 0, SO, Recv, "");
-		} 
+		}
+		usleep(1000);
 	}
 }
 
 
 int elaborate_packet(byte *packet, int rl, byte *sbuffer, int *sl) {
 
-	int l, index;
+	int l, index, ret;
 
 	int stx = (int) *((int*) packet);
 	RIFE(stx != STX, Pck, STX, "(%d != %d).", stx, STX);
@@ -191,16 +260,23 @@ int elaborate_packet(byte *packet, int rl, byte *sbuffer, int *sl) {
 	RIFE(l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", l + OH_SIZE, rl);
 
 	index = *((int*) &packet[8]);
-	printf("Size of %d bytes, index=%d", l, index);
+	printf("Size of %d bytes, index=%d\n", l, index);
 
 	memcpy(sbuffer, &STX, 4);
-	memcpy(&sbuffer[8], &index, 4); //index
 
-	return elaborate_image(packet + OH_SIZE, rl - OH_SIZE, &sbuffer[12], (int*) &sbuffer[4], index);
+	ret = elaborate_image(packet + OH_SIZE, rl - OH_SIZE, &sbuffer[12], (int*) &sbuffer[4], index);
+	if(ret < 0) return -1;
+	else if(!ret) index = -1;
+
+	memcpy(&sbuffer[4], &index, 4); // if there is some error index is set to -1.
+
+	return 0;
 }
 
 
 int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int index) {
+	return 0;
+
 	int w, h, ss, cl, ret;
 
 	unsigned char im[image_size];
@@ -261,18 +337,18 @@ int elaborate_image(byte *imbuffer, int iml, byte *bbox_buffer, int *bl, int ind
 	// X[i] = imbuffer[i-2] / 255.; ++i;
 
 	ret = mov_inference((float *) bbox_buffer, bl, thresh);
-	if(ret) return ret;
+	if(ret <= 0) return ret;
 
-    // printf("%d#%s\t(%7.6f, %7.6f, %7.6f, %7.6f, %7.6f)\n", *(int*) &bbox_buffer[20], (char*) &bbox_buffer[24], *(float*)&bbox_buffer[0], *(float*)&bbox_buffer[4], *(float*)&bbox_buffer[8], *(float*)&bbox_buffer[12], *(float*)&bbox_buffer[16]);
-    // printf("x=%7.6f y=%7.6f w=%7.6f h=%7.6f\tobj=%7.6f cls=%7.6f\t%d, %s\n",
-    printf("    x        y        w        h       obj        cls    \n");
-    printf("%7.6f | %7.6f | %7.6f | %7.6f\t%7.6f | %7.6f\t%d, %s\n",
-		*(float*) &bbox_buffer[0], *(float*) &bbox_buffer[4], 
-		*(float*)&bbox_buffer[8],  *(float*)&bbox_buffer[12],
-		*(float*)&bbox_buffer[16], *(float*)&bbox_buffer[20],
-		*(int*)&bbox_buffer[24],   (char*)&bbox_buffer[28]);
+	// printf("%d#%s\t(%7.6f, %7.6f, %7.6f, %7.6f, %7.6f)\n", *(int*) &bbox_buffer[20], (char*) &bbox_buffer[24], *(float*)&bbox_buffer[0], *(float*)&bbox_buffer[4], *(float*)&bbox_buffer[8], *(float*)&bbox_buffer[12], *(float*)&bbox_buffer[16]);
+	// printf("x=%7.6f y=%7.6f w=%7.6f h=%7.6f\tobj=%7.6f cls=%7.6f\t%d, %s\n",
+	printf("    x        y        w        h       obj        cls    \n");
+	printf("%7.6f | %7.6f | %7.6f | %7.6f\t%7.6f | %7.6f\t%d, %s\n",
+	*(float*) &bbox_buffer[0], *(float*) &bbox_buffer[4], 
+	*(float*)&bbox_buffer[8],  *(float*)&bbox_buffer[12],
+	*(float*)&bbox_buffer[16], *(float*)&bbox_buffer[20],
+	*(int*)&bbox_buffer[24],   (char*)&bbox_buffer[28]);
 	
-	return 0;
+	return ret;
 }	
 
 
@@ -280,9 +356,9 @@ int main( int argc, char** argv )
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	if(mov_init()) {
-		exit(1);
-	}
+	if(socket_start_server()) exit(socket_errno);
+
+	// if(mov_init()) exit(movidius_errno);
 
 #ifndef NCS
 	FILE*f = fopen("/home/developer/dog.jpg", "rb");
@@ -313,27 +389,22 @@ int main( int argc, char** argv )
 	}
 	printf("<<%s>>.\n", iface);
 
-    if(socket_start_server()) {
-		exit(1);
-	}
-
 	while(1) {
-		if(socket_start_server())    exit(socket_errno);
-
-		if(socket_wait_connection()) exit(socket_errno);
-
-		if(socket_recv_config())     exit(socket_errno);
-
-		if(socket_receiving()) 		 exit(socket_errno);
-
-		if(!close(sockfd_read)) {
-			printf("\nError during closing [errno=%d].\n", errno);
-			exit(1);
+		if(
+			socket_wait_connection() ||
+			socket_recv_config()		 ||
+			socket_receiving() ) {
+			if(close(sockfd_read)) {
+				printf("\nError during closing [errno=%d].\n", errno);
+				break;
+			}
+		} else {
+			break;
 		}
 	}
 #endif
 
-	mov_destroy();
+	if(mov_destroy())   exit(movidius_errno);
 
 	return 0;
 }
