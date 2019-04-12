@@ -21,13 +21,7 @@
 
 #include "socket.h"
 #include "movidius.h"
-#include "yolo.h"
-
-// network image resolution
-#define MOV_IM_W 416
-#define MOV_IM_H 416
-#define MOV_IM_C 3
-#define MOV_IM_SIZE (MOV_IM_W*MOV_IM_H*MOV_IM_C)
+#include "yolov2.h"
 
 // Location of age and gender networks
 #define YOLO_GRAPH_DIR "yolo/"
@@ -50,12 +44,6 @@ struct ncFifoHandle_t* ncs_fifo_out = NULL;
 #endif
 
 /** DARKNET */
-detection *dets;
-
-const char categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0train\0truck\0boat\0traffic light\0fire hydrant\0stop sign\0parking meter\0bench\0bird\0cat\0dog\0horse\0sheep\0cow\0elephant\0bear\0zebra\0giraffe\0backpack\0umbrella\0handbag\0tie\0suitcase\0frisbee\0skis\0snowboard\0sports ball\0kite\0baseball bat\0baseball glove\0skateboard\0surfboard\0tennis racket\0bottle\0wine glass\0cup\0fork\0knife\0spoon\0bowl\0banana\0apple\0sandwich\0orange\0broccoli\0carrot\0hot dog\0pizza\0donut\0cake\0chair\0sofa\0pottedplant\0bed\0diningtable\0toilet\0tvmonitor\0laptop\0mouse\0remote\0keyboard\0cell phone\0microwave\0oven\0toaster\0sink\0refrigerator\0book\0clock\0vase\0scissors\0teddy bear\0hair drier\0toothbrush";
-
-// char *names[80];
-int names[80];
 
 
 #ifdef NCS
@@ -171,61 +159,10 @@ int ncs_inference() {
 #endif
 
 
-
-void darknet_init () {
-    
-    int b = 0;
-    int i = -1;
-    int j = -1;
-    
-    while(++i < 625) {
-        if(categories[i] == '\0') {
-            names[++j] = b;
-            b = i + 1;
-        }
-    }
-
-    /** LAYER **/
-    yolo_image_w = 416;
-    yolo_image_h = 416;
-    yolo_image_c = 3;
-    yolo_w = 13;
-    yolo_h = 13;
-    yolo_n = 5;
-    yolo_coords = 4;
-    yolo_classes = 80;
-    yolo_biases[0] = 0.57273;
-    yolo_biases[1] = 0.677385;
-    yolo_biases[2] = 1.87446;
-    yolo_biases[3] = 2.06253;
-    yolo_biases[4] = 3.33843;
-    yolo_biases[5] = 5.47434;
-    yolo_biases[6] = 7.88282;
-    yolo_biases[7] = 3.52778;
-    yolo_biases[8] = 9.77052;
-    yolo_biases[9] = 9.16828;
-    yolo_outputs = yolo_h*yolo_w*yolo_n*(yolo_classes + yolo_coords + 1);
-    yolo_nboxes = yolo_w*yolo_h*yolo_n;
-
-    yolo_output = calloc(yolo_outputs, sizeof(float));
-    yolo_input_size = MOV_IM_SIZE;
-    yolo_input = calloc(MOV_IM_SIZE, sizeof(float));
-
-    /** LAYER **/
-
-
-    /** DETECTIONs **/
-    yolo_dets = (detection*) calloc(yolo_nboxes, sizeof(detection));
-    for(int i = yolo_nboxes-1; i >= 0; --i){
-        yolo_dets[i].prob = (float*) calloc(yolo_classes, sizeof(float));
-    }
-    /** DETECTIONs **/
-}
-
 /**
  * @return -1 if error; 0 if no bbox has found; x>0 if it found x bbox.
  * */ 
-int mov_inference(detection2 dets2[5], float thresh) {
+int mov_inference(detection2 dets2[5], float thresh, const imw, const int imh) {
 
 #ifdef NCS
     if(ncs_inference()) return -1;
@@ -241,7 +178,7 @@ int mov_inference(detection2 dets2[5], float thresh) {
 
 
     float c = clock();
-    get_bboxes(thresh);
+    get_bboxes(thresh, imw, imh);
     
     int nbbox = 0;
     for(int n = 0; n < yolo_nboxes; n++) {

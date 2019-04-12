@@ -1,59 +1,49 @@
 
+# This is what I use, uncomment if you know your arch and want to specify
+# ARCH= -gencode arch=compute_52,code=compute_52
 
 
-CC = gcc
-CPP = g++
+CC=gcc
+CPP=g++
 
-CFLAGS = -g -Wall -I.
-CPPFLAGS = $(CFLAGS) #-std=c++11 
-LIBRARIES = -L/usr/local/lib
-LFLAGS = -lmvnc -lm -ljpeg -lturbojpeg# -lopencv_core -lopencv_imgproc -lopencv_highgui
-LDFLAGS = $(LIBRARIES) $(LFLAGS)
-#SRC = ./src
-OBJ_DIR = debug/objs/
+ENV=
 
-SOURCES_C = darknet_region_layer.c movidius.c socket.c
-# SOURCES_CPP = $(wildcard yolo_ncs/*.cpp mov1.cpp) 
-# SOURCES_CPP = mov1.cpp #$(wildcard mov1.cpp) 
+#common to both compiler and linker
+COMMON=-Iinclude/ -I. -DOPENCV `pkg-config --cflags opencv` 
+#only for compiler
+CFLAGS=-Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -O0 -g
+#only for linker
+LDFLAGS= -lmvnc -lm -ljpeg -lturbojpeg `pkg-config --libs opencv` -lstdc++ 
 
-OBJECTS_C  = $(addprefix $(OBJ_DIR), $(SOURCES_C:.c=.o))
-OBJECTS_CPP = $(addprefix $(OBJ_DIR), $(SOURCES_CPP:.cpp=.o))
+CFLAGS+=$(OPTS)
 
-$(info $(OBJECTS_C))
-# OBJECTS_CPP := $(OBJECTS_CPP:.cpp=.o)
+OBJDIR=./debug/objs/
 
-# _OBJECTS_C = $(patsubst %.c,%.o,$(SOURCES_C))
-# _OBJECTS_CPP = $(patsubst %.cpp,%.o,$(SOURCES_CPP))
+EXEC=./debug/gengi
+OBJ=movidius.o yolov2.o  socket.o  image_opencv.o
 
-# OBJECTS_C  = $(patsubst %.o, debug/objs/%.o,$(_OBJECTS_C))
-# OBJECTS_CPP = $(patsubst %.o, debug/objs/%.o,$(_OBJECTS_CPP))
-
-EXECUTABLE = debug/gengi
+OBJS = $(addprefix $(OBJDIR), $(OBJ))
+DEPS = $(wildcard ./*.h)
 
 
-#all: $(OBJ_DIR) $(SOURCES_C) $(SOURCES_CPP) $(EXECUTABLE)
-all: clean $(OBJ_DIR) $(SOURCES_C) $(EXECUTABLE)
+all: obj clean $(EXEC)
+#all: obj  results $(SLIB) $(ALIB) $(EXEC)
 
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)/yolo_ncs
+$(info $(OBJS))
 
-$(OBJ_DIR)%.o : %.c
-	@echo Compiling: $< to $@
-	@$(CC) $(CFLAGS) -c $< -o $@
+$(EXEC): $(OBJS)
+	$(CC)  $(COMMON) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-debug/objs/%.o : %.cpp
-	@echo Compiling: $< 
-	@$(CPP) $(CPPFLAGS) -c $< -o $@
+$(OBJDIR)%.o: %.cpp $(DEPS)
+	$(CPP) $(COMMON) $(CFLAGS) -c $< -o $@
 
+$(OBJDIR)%.o: %.c $(DEPS)
+	$(CC)  $(COMMON) $(CFLAGS) -c $< -o $@
 
-$(EXECUTABLE): $(OBJECTS_C)
-	@echo Linking: $@
-	@$(CC) -g $(OBJECTS_C) $(LDFLAGS) -o $@
+obj:
+	mkdir -p ./debug/objs/
 
 .PHONY: clean
-clean: clean
-	@echo "\nmaking clean";
-	rm -f debug/mov2
-	rm -f debug/objs/*.o
-	rm -f debug/objs/yolo_ncs/*
+clean:
+	rm -rf $(OBJS) $(EXEC)
 

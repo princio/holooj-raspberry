@@ -15,9 +15,7 @@ int movidius_errno;
 int nc_error_code;
 
 int mov_init();
-
-int mov_inference(detection2 *dets2, float thresh);
-
+int mov_inference(detection2 dets2[5], float thresh, int imw, int imh);
 int mov_destroy();
 
 

@@ -1,11 +1,21 @@
 #ifndef __SOCKET_H__
 #define __SOCKET_H__
 
-#include "yolo.h"
+#include "yolov2.h"
 #define NCS
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef unsigned char byte;
 typedef const int error;
+
+
+typedef struct Color {
+    byte r;
+    byte g;
+    byte b;
+} Color;
 
 typedef struct detection2{
     box bbox;
@@ -31,6 +41,8 @@ typedef struct _SendBuffer
 } SendBuffer;
 
 
+int show_image_cv(void* im, const char* name, int, int);
+void make_window(char *name, int w, int h);
 
 #define ERROR(M1, V1, M2, V2) extern error M1##M2##Error;
 
@@ -84,6 +96,7 @@ extern error MovTooFewBytesError;
 #undef ERROR
 
 
+
 #define RIFE( expr, mask, code, msg, ... )\
     if((expr)) {\
         printf("\n[%s::%d]\t"#mask" "#code"\t(errno#%d=%s)"msg".\n\n", __FILE__, __LINE__, errno, strerror(errno), ##__VA_ARGS__);\
@@ -91,4 +104,7 @@ extern error MovTooFewBytesError;
         return -1;\
     }
 
+#ifdef __cplusplus
+}
+#endif
 #endif

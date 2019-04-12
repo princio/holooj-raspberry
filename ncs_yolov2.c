@@ -2,10 +2,81 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "yolo.h"
+#include "yolov2.h"
 
 #define EXPIT(X)  (1 / (1 + exp(-(X))))
 
+detection *dets;
+
+const char categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0train\0truck\0boat\0traffic light\0fire hydrant\0stop sign\0parking meter\0bench\0bird\0cat\0dog\0horse\0sheep\0cow\0elephant\0bear\0zebra\0giraffe\0backpack\0umbrella\0handbag\0tie\0suitcase\0frisbee\0skis\0snowboard\0sports ball\0kite\0baseball bat\0baseball glove\0skateboard\0surfboard\0tennis racket\0bottle\0wine glass\0cup\0fork\0knife\0spoon\0bowl\0banana\0apple\0sandwich\0orange\0broccoli\0carrot\0hot dog\0pizza\0donut\0cake\0chair\0sofa\0pottedplant\0bed\0diningtable\0toilet\0tvmonitor\0laptop\0mouse\0remote\0keyboard\0cell phone\0microwave\0oven\0toaster\0sink\0refrigerator\0book\0clock\0vase\0scissors\0teddy bear\0hair drier\0toothbrush";
+int names[80];
+
+float *yolo_output;
+float *yolo_input;
+int yolo_h;
+int yolo_w;
+int yolo_classes;
+int yolo_coords;    //number of coordinates required by a bounding box
+int yolo_n;         // bounding box to detect number
+int yolo_outputs;
+float yolo_biases[20]; 
+
+int yolo_input_w = 416;
+int yolo_input_h = 416;
+unsigned int yolo_input_size;
+
+int yolo_nboxes;
+
+
+void darknet_init () {
+    
+    int b = 0;
+    int i = -1;
+    int j = -1;
+    
+    while(++i < 625) {
+        if(categories[i] == '\0') {
+            names[++j] = b;
+            b = i + 1;
+        }
+    }
+
+    /** LAYER **/
+    yolo_input_w = 416;
+    yolo_input_h = 416;
+    yolo_input_size = yolo_input_w*yolo_input_h*3;
+    yolo_input = calloc(yolo_input_size, sizeof(float));
+
+    yolo_w = 13;
+    yolo_h = 13;
+    yolo_n = 5;
+    yolo_coords = 4;
+    yolo_classes = 80;
+    yolo_biases[0] = 0.57273;
+    yolo_biases[1] = 0.677385;
+    yolo_biases[2] = 1.87446;
+    yolo_biases[3] = 2.06253;
+    yolo_biases[4] = 3.33843;
+    yolo_biases[5] = 5.47434;
+    yolo_biases[6] = 7.88282;
+    yolo_biases[7] = 3.52778;
+    yolo_biases[8] = 9.77052;
+    yolo_biases[9] = 9.16828;
+    yolo_outputs = yolo_h*yolo_w*yolo_n*(yolo_classes + yolo_coords + 1);
+    yolo_nboxes = yolo_w*yolo_h*yolo_n;
+
+    yolo_output = calloc(yolo_outputs, sizeof(float));
+
+    /** LAYER **/
+
+
+    /** DETECTIONs **/
+    yolo_dets = (detection*) calloc(yolo_nboxes, sizeof(detection));
+    for(int i = yolo_nboxes-1; i >= 0; --i){
+        yolo_dets[i].prob = (float*) calloc(yolo_classes, sizeof(float));
+    }
+    /** DETECTIONs **/
+}
 
 float overlap(float x1, float w1, float x2, float w2)
 {
@@ -39,13 +110,11 @@ float box_iou(box a, box b)
     return box_intersection(a, b)/box_union(a, b);
 }
 
-void correct_region_boxes()
+void correct_region_boxes(int imw, int imh)
 {
     int i;
-    int imw = yolo_image_w;
-    int imh = yolo_image_h;
-    int w = yolo_w;
-    int h = yolo_h;
+    int w = yolo_input_w;
+    int h = yolo_input_h;
 
     int new_w=0;
     int new_h=0;
@@ -139,7 +208,7 @@ box get_region_box(float *x, int n, int index, int i, int j)
 }
 
 
-void get_bboxes(float thresh)
+void get_bboxes(float thresh, int imw, int imh)
 {
     int i,j,n;
     int wh = yolo_w*yolo_h;
@@ -186,7 +255,7 @@ void get_bboxes(float thresh)
             b += 85;
         }
     }
-    correct_region_boxes();
+    correct_region_boxes(imw, imh);
 
     do_nms_sort();
 }

@@ -19,6 +19,8 @@
         "errno-base.h": "c",
         "yolo.h": "c",
         "inet.h": "c",
-        "ifaddrs.h": "c"
+        "ifaddrs.h": "c",
+        "unistd.h": "c",
+        "yolov2.h": "c"
     }
 }

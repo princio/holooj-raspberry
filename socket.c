@@ -19,12 +19,12 @@
 
 #include "socket.h"
 #include "movidius.h"
-#include "yolo.h"
 
 #define PORT_IN 56789
 #define QUEUE_LENGTH 3
 
 #define MOV
+#define SHOWIMAGE
 
 #define RECV 1
 #define SEND 0
@@ -258,11 +258,11 @@ int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
 
 	RIFE(packet->l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", packet->l + OH_SIZE, rl);
 
-	printf("Size of %d bytes, index=%d\r", packet->l, packet->index);
-
 	sbuffer->stx = STX;
 	sbuffer->index = packet->index;
 	sbuffer->n = elaborate_image(packet->image, packet->l, sbuffer->dets, sbuffer->index);
+
+	printf("##\t%-5d B\tindex=%-4d\tnbbox=%-d\r", packet->l, packet->index, sbuffer->n);
 
 	return sbuffer->n;
 }
@@ -297,20 +297,17 @@ int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
 	return 0;
 #endif
 	int i = 0;
-	int letter_box_image_first_pixel = 3*config.width*(yolo_image_h - config.height) >> 1;
+	w = config.width;
+	h = yolo_input_h - config.height;
+	int letter_box_image_first_pixel = (3*w*h) >> 1;
 	float *_yolo_input = &yolo_input[letter_box_image_first_pixel];
 	while(i <= (iml-3)) {
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i+2] / 255.; ++i;
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i] / 255.;   ++i;
+		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i-2] / 255.; ++i;
 	}
 
-	// X[i] = imbuffer[i+2] / 255.; ++i;
-	// X[i] = imbuffer[i] / 255.;   ++i;
-	// X[i] = imbuffer[i-2] / 255.; ++i;
-	nbbox = mov_inference(dets2, thresh);
-	w = config.width;
-	h = yolo_image_h - config.height;
+	nbbox = mov_inference(dets2, thresh, config.width, config.height);
 	for(i = nbbox-1; i >= 0; --i) {
 		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
 			index, nbbox - i,
@@ -318,54 +315,48 @@ int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
 
 		box b = dets2[i].bbox;
 
-		int left  = (b.x-b.w/2.)*config.width;
-		int right = (b.x+b.w/2.)*config.width;
+		int left  = (b.x-b.w/2.)*w;
+		int right = (b.x+b.w/2.)*w;
 		int top   = (b.y-b.h/2.)*h;
 		int bot   = (b.y+b.h/2.)*h;
 
-		byte r = 50 * (i % 1);
-		byte g = 50 * (i % 2);
-		byte blue = 50 * (i % 3);
+		byte color[3];
+		color[0] = 250;
+		color[1] = 50 + 50 * (i % 2);
+		color[2] = 50 + 50 * (i % 3);
 
-		if(left < 0) left = 0;
-		if(right > config.width-1) right = config.width-1;
-		if(top < 0) top = 0;
-		if(bot > h-1) bot = h-1;
+		int thickness = 0; //border width in pixel minus 1
+		if(left < 0) left = thickness;
+		if(right > w-thickness) right = w-thickness;
+		if(top < 0) top = thickness;
+		if(bot > h-thickness) bot = h-thickness;
 
-		byte *_im = &imbuffer[letter_box_image_first_pixel];
-		int top_line_pixel = 3*top*config.width;
-		int bot_line_pixel = 3*bot*config.width;
-		int first_pixel_left = 3*left;
-		int first_pixel_right = 3*right;
-    for(int k = first_pixel_left; k <= first_pixel_right; k+=3){
-			_im[k + top_line_pixel + 0] = r;
-			_im[k + top_line_pixel + 1] = g;
-			_im[k + top_line_pixel + 2] = blue;
-
-
-			_im[k + bot_line_pixel + 0] = r;
-			_im[k + bot_line_pixel + 1] = g;
-			_im[k + bot_line_pixel + 2] = blue;
+		byte *_im = imbuffer;
+		int top_row = 3*top*h;
+		int bot_row = 3*bot*h;
+		int left_col = 3*left;
+		int right_col = 3*right;
+    for(int k = left_col; k <= right_col; k+=3) {
+			for(int wh = 0; wh <= thickness; wh++) {
+				int border_line = wh*w*3;
+				memcpy(&_im[k + top_row - border_line], color, 3);
+				memcpy(&_im[k + bot_row + border_line], color, 3);
+			}
     }
-    for(int k = top; k <= bot; k+=3) {
-			int line_pixel = 3*k*config.width;
-			_im[first_pixel_left  + line_pixel + 0] = r;
-			_im[first_pixel_right + line_pixel + 0] = r;
-
-			_im[first_pixel_left  + line_pixel + 1] = g;
-			_im[first_pixel_right + line_pixel + 1] = g;
-
-			_im[first_pixel_left  + line_pixel + 2] = blue;
-			_im[first_pixel_right + line_pixel + 2] = blue;
+    for(int k = top_row; k <= bot_row; k+=3) {
+			for(int wh = 0; wh < thickness; wh++) {
+				memcpy(&_im[k - wh + left_col],  color, 3);
+				memcpy(&_im[k + wh + right_col], color, 3);
+			}
     }
 	}
 	printf("\n");
 
-	if(nbbox > 0) {
+	if(nbbox >= 0) {
 		unsigned long imjl = 200000;
 		byte *imj = tjAlloc((int) imjl);
 		tjhandle tjh = tjInitCompress();
-		ret = tjCompress2(tjh, imbuffer, config.width, 0, config.height, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
+		ret = tjCompress2(tjh, imbuffer, w, 0, h, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
 		RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
 		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
 
@@ -378,6 +369,9 @@ int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
 		RIFE(fclose(f), Gen, _, "(fclose error)");
 	}
 
+#ifdef SHOWIMAGE
+	show_image_cv(imbuffer, "bibo", w, h);
+#endif
 	return nbbox;
 }	
 
@@ -386,6 +380,9 @@ int main( int argc, char** argv )
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
+#ifdef SHOWIMAGE
+	make_window("bibo", 512, 512);
+#endif
 #ifdef MOV
 	if(mov_init()) exit(movidius_errno);
 #endif
