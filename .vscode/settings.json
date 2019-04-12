@@ -21,6 +21,9 @@
         "inet.h": "c",
         "ifaddrs.h": "c",
         "unistd.h": "c",
-        "yolov2.h": "c"
+        "yolov2.h": "c",
+        "ncs.h": "c",
+        "ncs_yolov2.h": "c",
+        "ny2.h": "c"
     }
 }

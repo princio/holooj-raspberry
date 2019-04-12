@@ -20,7 +20,7 @@ CFLAGS+=$(OPTS)
 OBJDIR=./debug/objs/
 
 EXEC=./debug/gengi
-OBJ=movidius.o yolov2.o  socket.o  image_opencv.o
+OBJ=ncs.o ny2.o  socket.o  image_opencv.o
 
 OBJS = $(addprefix $(OBJDIR), $(OBJ))
 DEPS = $(wildcard ./*.h)

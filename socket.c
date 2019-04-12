@@ -18,7 +18,7 @@
 #include <unistd.h>
 
 #include "socket.h"
-#include "movidius.h"
+#include "ny2.h"
 
 #define PORT_IN 56789
 #define QUEUE_LENGTH 3
@@ -59,63 +59,9 @@ int timeouts = 0;
 char iface[10] = "enp0s9";
 
 
-#define ERROR(M1, V1, M2, V2) const error M1##M2##Error = (1 << V1) | (1 << (16+V2));
-error Gen_Error  = INT32_MAX;
-error SOMask     = 1 <<  1;
-error PollMask   = 1 <<  2;
-error PckMask    = 1 <<  3;
-error TjMask     = 1 <<  4;
-error ImMask     = 1 <<  5;
-error NCSMask    = 1 <<  6;
-error MovMask    = 1 <<  7;
-
-
-ERROR(   SO,     1,        Creation,     1);
-ERROR(   SO,     1,            Bind,     2);
-ERROR(   SO,     1,       Listening,     3);
-ERROR(   SO,     1,          Accept,     4);
-ERROR(   SO,     1,            Send,     5);
-ERROR(   SO,     1,            Recv,     6);
-ERROR(   SO,     1,            Addr,     7);
-
-ERROR( Poll,     2,         Generic,     1);
-ERROR( Poll,     2,         Timeout,     2);
-ERROR( Poll,     2,        RecvBusy,     3);
-ERROR( Poll,     2,              In,     4);
-ERROR( Poll,     2,             Out,     5);
-
-ERROR(  Pck,     3,           Error,     1);
-ERROR(  Pck,     3,             STX,     2);
-ERROR(  Pck,     3,        TooSmall,     3);
-
-ERROR(   Tj,     4,         Generic,     1);
-ERROR(   Tj,     4,          Header,     2);
-ERROR(   Tj,     4,      Decompress,     3);
-ERROR(   Tj,     4,        Compress,     4);
-ERROR(   Tj,     4,         Destroy,     5);
-
-ERROR(   Im,     5,       WrongSize,     1);
-
-ERROR(  NCS,     6,       DevCreate,     1);
-ERROR(  NCS,     6,         DevOpen,     2);
-ERROR(  NCS,     6,     GraphCreate,     3);
-ERROR(  NCS,     6,   GraphAllocate,     4);
-ERROR(  NCS,     6,       Inference,     5);
-ERROR(  NCS,     6,          GetOpt,     6);
-ERROR(  NCS,     6,        FifoRead,     7);
-ERROR(  NCS,     6,         Destroy,     8);
-
-ERROR(  Mov,     7,   ReadGraphFile,     1);
-ERROR(  Mov,     7,     TooFewBytes,     2);
-
-#undef ERROR
-
-
-
-
 
 int elaborate_packet(RecvBuffer *rbuffer, int rl, SendBuffer *sbuffer);
-int elaborate_image(byte *imbuffer, int iml, detection2 dets[5], int index);
+int elaborate_image(byte *imbuffer, int iml, rec_object dets[5], int index);
 int socket_wait_data(int rec);
 
 
@@ -135,6 +81,92 @@ int get_address(in_addr_t *addr, char *iface) {
 	freeifaddrs(ifaddr);
 
 	return 0;
+}
+
+
+int decode_jpeg(byte *imj, int imjl, byte *im) {
+    tjhandle tjh;
+    int w, h, ss, cl, ret;
+    
+    tjh = tjInitDecompress();
+		
+    if(tjDecompressHeader3(tjh, imj, imjl, &w, &h, &ss, &cl)) {
+        RIFE(1, Tj, Header, "(%s)", tjGetErrorStr());
+    }
+    switch(cl) {
+        case TJCS_CMYK: printf("CMYK"); break;
+        case TJCS_GRAY: printf("GRAY"); break;
+        case TJCS_RGB: printf("RGB"); break;
+        case TJCS_YCbCr: printf("YCbCr"); break;
+        case TJCS_YCCK: printf("YCCK"); break;
+    }
+    ret = tjDecompress2(tjh, imj, imjl, im, 0, 0, 0, TJPF_RGB, 0);
+    RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
+    RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
+
+    return 0;
+}
+
+
+int save_image_jpeg(byte *im, int index) {
+    int ret;
+    unsigned long imjl;
+    byte *imj;
+    tjhandle tjh;
+
+    imjl = 200000;
+    imj = tjAlloc((int) imjl);
+    tjh = tjInitCompress();
+    ret = tjCompress2(tjh, im, config.width, 0, config.height, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
+    RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
+    RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
+
+    char filename[30];
+    sprintf(filename, "./phs/ph_%d.jpg", index);
+    FILE *f = fopen(filename, "wb");
+    RIFE(!f, Generic, File, "(fopen error)");
+    ret = fwrite(imj, 1, imjl, f);
+    RIFE(ret < imjl, Generic, File, "(fwrite error: %d instead of %lu)", ret, imjl);
+    RIFE(fclose(f), Generic, File, "(fclose error)");
+
+    return 0;
+}
+
+
+void draw_bbox(byte *im, box b, byte color[3]) {
+    int w = config.width;
+    int h = config.height;
+
+
+    int left  = (b.x-b.w/2.)*w;
+    int right = (b.x+b.w/2.)*w;
+    int top   = (b.y-b.h/2.)*h;
+    int bot   = (b.y+b.h/2.)*h;
+
+
+    int thickness = 0; //border width in pixel minus 1
+    if(left < 0) left = thickness;
+    if(right > w-thickness) right = w-thickness;
+    if(top < 0) top = thickness;
+    if(bot > h-thickness) bot = h-thickness;
+
+    int top_row = 3*top*h;
+    int bot_row = 3*bot*h;
+    int left_col = 3*left;
+    int right_col = 3*right;
+    for(int k = left_col; k <= right_col; k+=3) {
+        for(int wh = 0; wh <= thickness; wh++) {
+            int border_line = wh*w*3;
+            memcpy(&im[k + top_row - border_line], color, 3);
+            memcpy(&im[k + bot_row + border_line], color, 3);
+        }
+    }
+    for(int k = top_row; k <= bot_row; k+=3) {
+        for(int wh = 0; wh < thickness; wh++) {
+            memcpy(&im[k - wh + left_col],  color, 3);
+            memcpy(&im[k + wh + right_col], color, 3);
+        }
+    }
 }
 
 
@@ -158,9 +190,8 @@ int socket_start_server() {
 }
 
 
-
 int socket_wait_connection() {
-  int addrlen = sizeof(holo_addr);
+    int addrlen = sizeof(holo_addr);
 	timeouts = 0;
 	
 	printf("waiting new connection...");
@@ -211,7 +242,6 @@ int socket_wait_data(int rec) {
 }
 
 
-
 int socket_receiving() {
 	// struct timespec sleep_time;
 	// sleep_time.tv_nsec=1*000*000; //1 ms
@@ -229,10 +259,10 @@ int socket_receiving() {
 				int nbbox = elaborate_packet(rbuffer, rl, &sbuffer);
 				if(nbbox >= 0) {
 					if(!socket_wait_data(SEND)) {
-						int sl = send(sockfd_read, &sbuffer, 8 + nbbox*sizeof(detection2), 0);
+						int sl = send(sockfd_read, &sbuffer, 8 + nbbox*sizeof(rec_object), 0);
 						if(sl <= 0) {
 							printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno),sl);
-							socket_errno = SOSendError;
+							socket_errno = (SOError) SOSend;
 						}
 						else continue;
 					}
@@ -241,7 +271,7 @@ int socket_receiving() {
 				printf("[Warning %s::%d]: recv return 0.\n", __FILE__, __LINE__);
 			} else {
 				printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno), rl);
-				socket_errno = SOSendError;
+				socket_errno = (SOError) SOSend;
 			}
 		}
 		usleep(1000000);
@@ -250,8 +280,6 @@ int socket_receiving() {
 
 
 int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
-
-	int ret;
 
 	RIFE(packet->stx != STX, Pck, STX, "(%d != %d).", packet->stx, STX);
 
@@ -267,110 +295,37 @@ int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
 	return sbuffer->n;
 }
 
+int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
+	int nbbox;
 
-int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
-	int w, h, ss, cl, ret, nbbox;
-
-	unsigned char im[image_size];
-
+	byte *im;
 	if(!config.isBMP) {
-		tjhandle tjh = tjInitDecompress();
-		
-		if(tjDecompressHeader3(tjh, imbuffer, iml, &w, &h, &ss, &cl)) {
-			RIFE(1, Tj, Header, "(%s)", tjGetErrorStr());
-		}
-		switch(cl) {
-			case TJCS_CMYK: printf("CMYK"); break;
-			case TJCS_GRAY: printf("GRAY"); break;
-			case TJCS_RGB: printf("RGB"); break;
-			case TJCS_YCbCr: printf("YCbCr"); break;
-			case TJCS_YCCK: printf("YCCK"); break;
-		}
-		ret = tjDecompress2(tjh, imbuffer, iml, im, 0, 0, 0, TJPF_RGB, 0);
-		RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
-		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
+	    byte im_bmp[image_size];
+        decode_jpeg(imbuffer, iml, im_bmp);
+        im = im_bmp;
 	}
+    else {
+        im = imbuffer;
+    }
 
-	// RIFE(iml != yolo_input_size, Im, WrongSize, "(%d != %d)", iml, yolo_input_size);
+	nbbox = ny2_inference_byte(im, robj, thresh, config.width, config.height, 3);
 
-#ifndef MOV
-	return 0;
-#endif
-	int i = 0;
-	w = config.width;
-	h = yolo_input_h - config.height;
-	int letter_box_image_first_pixel = (3*w*h) >> 1;
-	float *_yolo_input = &yolo_input[letter_box_image_first_pixel];
-	while(i <= (iml-3)) {
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i+2] / 255.; ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i] / 255.;   ++i;
-		_yolo_input[i] = imbuffer[i] / 255.; ++i;// X[i] = imbuffer[i-2] / 255.; ++i;
-	}
-
-	nbbox = mov_inference(dets2, thresh, config.width, config.height);
-	for(i = nbbox-1; i >= 0; --i) {
+    byte color[3] = {250, 0, 0};
+	for(int i = nbbox-1; i >= 0; --i) {
 		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
 			index, nbbox - i,
-			dets2[i].bbox.x, dets2[i].bbox.y, dets2[i].bbox.w, dets2[i].bbox.h, dets2[i].objectness, dets2[i].prob, dets2[i].name);
+			robj[i].bbox.x, robj[i].bbox.y, robj[i].bbox.w, robj[i].bbox.h, robj[i].objectness, robj[i].prob, robj[i].name);
 
-		box b = dets2[i].bbox;
-
-		int left  = (b.x-b.w/2.)*w;
-		int right = (b.x+b.w/2.)*w;
-		int top   = (b.y-b.h/2.)*h;
-		int bot   = (b.y+b.h/2.)*h;
-
-		byte color[3];
-		color[0] = 250;
-		color[1] = 50 + 50 * (i % 2);
-		color[2] = 50 + 50 * (i % 3);
-
-		int thickness = 0; //border width in pixel minus 1
-		if(left < 0) left = thickness;
-		if(right > w-thickness) right = w-thickness;
-		if(top < 0) top = thickness;
-		if(bot > h-thickness) bot = h-thickness;
-
-		byte *_im = imbuffer;
-		int top_row = 3*top*h;
-		int bot_row = 3*bot*h;
-		int left_col = 3*left;
-		int right_col = 3*right;
-    for(int k = left_col; k <= right_col; k+=3) {
-			for(int wh = 0; wh <= thickness; wh++) {
-				int border_line = wh*w*3;
-				memcpy(&_im[k + top_row - border_line], color, 3);
-				memcpy(&_im[k + bot_row + border_line], color, 3);
-			}
-    }
-    for(int k = top_row; k <= bot_row; k+=3) {
-			for(int wh = 0; wh < thickness; wh++) {
-				memcpy(&_im[k - wh + left_col],  color, 3);
-				memcpy(&_im[k + wh + right_col], color, 3);
-			}
-    }
+		draw_bbox(im, robj[i].bbox, color);
 	}
 	printf("\n");
 
 	if(nbbox >= 0) {
-		unsigned long imjl = 200000;
-		byte *imj = tjAlloc((int) imjl);
-		tjhandle tjh = tjInitCompress();
-		ret = tjCompress2(tjh, imbuffer, w, 0, h, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
-		RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
-		RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
-
-		char filename[30];
-		sprintf(filename, "./phs/ph_%d.jpg", index);
-		FILE *f = fopen(filename, "wb");
-		RIFE(!f, Gen, _, "(fopen error)");
-		ret = fwrite(imj, 1, imjl, f);
-		RIFE(ret < imjl, Gen, _, "(fwrite error: %d instead of %lu)", ret, imjl);
-		RIFE(fclose(f), Gen, _, "(fclose error)");
+        save_image_jpeg(im, index);
 	}
 
 #ifdef SHOWIMAGE
-	show_image_cv(imbuffer, "bibo", w, h);
+	show_image_cv(im, "bibo", config.width, config.height);
 #endif
 	return nbbox;
 }	
@@ -378,15 +333,16 @@ int elaborate_image(byte *imbuffer, int iml, detection2 dets2[5], int index) {
 
 int main( int argc, char** argv )
 {
+    int ret;
 	setvbuf(stdout, NULL, _IONBF, 0);
 
 #ifdef SHOWIMAGE
 	make_window("bibo", 512, 512);
 #endif
-#ifdef MOV
-	if(mov_init()) exit(movidius_errno);
-#endif
+
+	if((ret = ny2_init())) exit(ret);
 	if(socket_start_server()) exit(socket_errno);
+
 #ifndef NCS
 	FILE*f = fopen("/home/developer/dog.jpg", "rb");
 	fseek(f, 0, SEEK_END);
@@ -431,7 +387,7 @@ int main( int argc, char** argv )
 	}
 #endif
 
-	if(mov_destroy())   exit(movidius_errno);
+	ny2_destroy();
 
 	return 0;
 }

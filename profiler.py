@@ -41,5 +41,18 @@ for mask in masks.split(','):
     source += "\n"
     m=m+1
 
-print(header)
-print(source)
+# print(header)
+# print(source)
+
+enum = ""
+m = 1
+for mask in masks.split(','):
+    b=1
+    enum += "typedef enum {\n"
+    for bit in bits[mask].split(','):
+        enum += "\t" + mask + bit + ",\n"
+        b=b+1
+    enum = enum[0:-2] + "\n} " + mask + "Error;\n\n"
+    m=m+1
+
+print(enum)
