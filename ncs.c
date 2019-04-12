@@ -112,7 +112,7 @@ int ncs_inference(float *in, unsigned int in_size_bytes, float *out, int out_siz
     retCode = ncFifoGetOption(fifo_out, NC_RO_FIFO_ELEMENT_DATA_SIZE, &length_bytes, &returned_opt_size);
     RIFEM(retCode, GetOpt, "");
 
-    RIFEM(length_bytes != out_size_bytes, TooFewBytes, "(%d < %d)", length_bytes, out_size_bytes);
+    RIFEM(length_bytes != out_size_bytes, TooFewBytes, "(%d != %d)", length_bytes, out_size_bytes);
 
     retCode = ncFifoReadElem(fifo_out, out, &length_bytes, NULL);
     RIFEM(retCode, FifoRead, "");

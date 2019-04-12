@@ -280,7 +280,7 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
 int ny2_inference(rec_object *robj, float thresh, const int imw, const int imh) {
 
 #ifndef NY2_TEST
-    if(ncs_inference(yolo_input, NY2_INPUT_SIZE << 4, yolo_output, NY2_OUTPUT_SIZE << 4)) return -1;
+    if(ncs_inference(yolo_input, (NY2_INPUT_SIZE) << 2, yolo_output, (NY2_OUTPUT_SIZE) << 2)) return -1;
 #else
     int i = -1;
     char s[20] = {0};
