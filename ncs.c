@@ -123,6 +123,7 @@ int ncs_inference(float *in, unsigned int in_size_bytes, float *out, int out_siz
 int ncs_destroy() {
     RIFEM(retCode = ncFifoDestroy(&fifo_in), Destroy, "");
     RIFEM(retCode = ncFifoDestroy(&fifo_out), Destroy, "");
+    RIFEM(retCode = ncGraphDestroy(&graph_handle), Destroy, "");
     RIFEM(retCode = ncDeviceClose(dev_handle), Destroy, "");
     RIFEM(retCode = ncDeviceDestroy(&dev_handle), Destroy, "");
     return 0;

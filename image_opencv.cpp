@@ -29,10 +29,12 @@ byte* load_image_cv(char *filename, int *w, int *h, int *size)
 
 int show_image_cv(void* im, const char* name, int w, int h, int f)
 {
-    Mat m = Mat(h, w, f ? CV_32FC3 : CV_8UC3, im, 0);
+    Mat m = Mat(w, h, f ? CV_32FC3 : CV_8UC3, im, 0);
     imshow(name, m);
-	// updateWindow("bibo");
-    waitKey(1);
+    updateWindow(name);
+    int c = waitKey(100);
+    if (c != -1) c = c%256;
+    return c;
     return 0;
 }
 

@@ -2,7 +2,8 @@
 #define __SOCKET_H__
 
 #include "ny2.h"
-#define NCS2
+
+#define NCS
 
 #ifdef __cplusplus
 extern "C" {

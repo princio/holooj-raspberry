@@ -56,34 +56,30 @@ float box_iou(box a, box b)
     return box_intersection(a, b)/box_union(a, b);
 }
 
-void correct_region_boxes(int imw, int imh)
+void correct_region_boxes(int w, int h)
 {
     int i;
-    int w = NY2_INPUT_W;
-    int h = NY2_INPUT_H;
+    int netw = NY2_INPUT_W;
+    int neth = NY2_INPUT_H;
 
     int new_w=0;
     int new_h=0;
-    
-    if (((float)imw/w) < ((float)imh/h)) {
-        new_w = imw;
-        new_h = (h * imw)/w;
+    if (((float)netw/w) < ((float)neth/h)) {
+        new_w = netw;
+        new_h = (h * netw)/w;
     } else {
-        new_h = imh;
-        new_w = (w * imh)/h;
+        new_h = neth;
+        new_w = (w * neth)/h;
     }
-    for (i = 0; i < NY2_B_CELL; ++i){
+    for (i = 0; i < NY2_B_TOTAL; ++i){
+        if(dets[i].prob[16] > 0.5) {
+            printf("\b");
+        }
         box b = dets[i].bbox;
-        b.x =  (b.x - (imw - new_w)/2./imw) / ((float)new_w/imw); 
-        b.y =  (b.y - (imh - new_h)/2./imh) / ((float)new_h/imh); 
-        b.w *= (float)imw/new_w;
-        b.h *= (float)imh/new_h;
-        // if(!relative){ //set to 1 in darknet:detector.c
-        //     b.x *= w;
-        //     b.w *= w;
-        //     b.y *= h;
-        //     b.h *= h;
-        // }
+        b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw); 
+        b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth); 
+        b.w *= (float)netw/new_w;
+        b.h *= (float)neth/new_h;
         dets[i].bbox = b;
     }
 }
@@ -201,6 +197,7 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
             b += 85;
         }
     }
+
     correct_region_boxes(imw, imh);
 
     do_nms_sort();
@@ -266,11 +263,12 @@ int ny2_init () {
 int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int const imw, int const imh, int const imc) {
 	int i = 0;
     int l = imw*imh*imc;
-	float *y = &yolo_input[imc * imw * ((NY2_INPUT_H - imh) >> 1)];
+    int letterbox = imc * imw * ((NY2_INPUT_W - imh) >> 1);
+	float *y = &yolo_input[letterbox];
 	while(i <= l-3) {
-		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
-		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
-		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
+		y[i] = image[i + 2] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
+		y[i] = image[i] / 255.;     ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
+		y[i] = image[i - 2] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
 	}
 
 	show_image_cv(yolo_input, "bibo", NY2_INPUT_W, NY2_INPUT_H, 1);

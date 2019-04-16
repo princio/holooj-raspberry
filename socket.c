@@ -36,8 +36,8 @@ const int OH_SIZE = 12;
 
 typedef struct Config {
 	int STX;
-	int width;
-	int height;
+	int rows;
+	int cols;
 	int isBMP;
 } Config;
 
@@ -118,7 +118,7 @@ int save_image_jpeg(byte *im, int index) {
     imjl = 200000;
     imj = tjAlloc((int) imjl);
     tjh = tjInitCompress();
-    ret = tjCompress2(tjh, im, config.width, 0, config.height, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
+    ret = tjCompress2(tjh, im, config.rows, config.cols, config.cols, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
     RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
     RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
 
@@ -135,8 +135,8 @@ int save_image_jpeg(byte *im, int index) {
 
 
 void draw_bbox(byte *im, box b, byte color[3]) {
-    int w = config.width;
-    int h = config.height;
+    int w = config.cols;
+    int h = config.rows;
 
 
     int left  = (b.x-b.w/2.)*w;
@@ -145,14 +145,14 @@ void draw_bbox(byte *im, box b, byte color[3]) {
     int bot   = (b.y+b.h/2.)*h;
 
 
-    int thickness = 0; //border width in pixel minus 1
+    int thickness = 2; //border width in pixel minus 1
     if(left < 0) left = thickness;
     if(right > w-thickness) right = w-thickness;
     if(top < 0) top = thickness;
     if(bot > h-thickness) bot = h-thickness;
 
-    int top_row = 3*top*h;
-    int bot_row = 3*bot*h;
+    int top_row = 3*top*w;
+    int bot_row = 3*bot*w;
     int left_col = 3*left;
     int right_col = 3*right;
     for(int k = left_col; k <= right_col; k+=3) {
@@ -162,11 +162,15 @@ void draw_bbox(byte *im, box b, byte color[3]) {
             memcpy(&im[k + bot_row + border_line], color, 3);
         }
     }
-    for(int k = top_row; k <= bot_row; k+=3) {
-        for(int wh = 0; wh < thickness; wh++) {
-            memcpy(&im[k - wh + left_col],  color, 3);
-            memcpy(&im[k + wh + right_col], color, 3);
+	int pixel_left = top*3*w + left_col;
+	int pixel_right = top*3*w + right_col;
+    for(int k = top; k <= bot; k++) {
+        for(int wh = 0; wh <= thickness*3; wh+=3) {
+            memcpy(&im[pixel_left  - wh], color, 3);
+            memcpy(&im[pixel_right + wh], color, 3);
         }
+		pixel_left += 3*w;
+		pixel_right += 3*w;
     }
 }
 
@@ -215,10 +219,10 @@ int socket_recv_config() {
 	ret = recv(sockfd_read, &config, sizeof(Config), 0); //REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
 	RIFE(ret <= 0, SO, Recv, "(%d)", ret);
 
-	printf("%d\t%dx%d, %s\n", config.STX, config.width, config.height, config.isBMP ? "BMP" : "JPEG");
+	printf("%d\t%dx%d, %s\n", config.STX, config.rows, config.cols, config.isBMP ? "BMP" : "JPEG");
 
-	buffer_size = (OH_SIZE + config.width*config.height*3) >> (config.isBMP ? 0 : 4);
-	image_size = config.width*config.height*3;
+	buffer_size = (OH_SIZE + config.rows*config.cols*3) >> (config.isBMP ? 0 : 4);
+	image_size = config.rows*config.cols*3;
 
 	printf("Buffer size set to %d.\n", buffer_size);
 
@@ -312,7 +316,7 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
         im = imbuffer;
     }
 
-	nbbox = ny2_inference_byte(im, robj, thresh, config.width, config.height, 3);
+	nbbox = ny2_inference_byte(im, robj, thresh, config.cols, config.rows, 3);
 
     byte color[3] = {250, 0, 0};
 	for(int i = nbbox-1; i >= 0; --i) {
@@ -325,6 +329,7 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
 	printf("\n");
 
 	if(nbbox >= 0) {
+		show_image_cv(im, "bibo2", config.rows, config.cols, 0);
         save_image_jpeg(im, index);
 	}
 
@@ -364,19 +369,21 @@ int main( int argc, char** argv )
 		ret = socket_receiving();		if(ret) continue;
 	}
 #else
+	make_window("bibo2", 512, 512);
 	rec_object robj[5];
 	char fpath[100] = {0};
 	int sz = 100;
 	int lr;
-	printf("Insert photo path: ");
-	if (fgets (fpath, sz, stdin) == NULL) exit(-1);
-	if(fpath[0] = '\n') {
-		strcpy(fpath, "/home/developer/dog.jpg");
-	}
-	printf("\n Elaborating --> %s...", fpath);
+	// printf("Insert photo path: ");
+	// if (fgets (fpath, sz, stdin) == NULL) exit(-1);
+	// if(fpath[0] = '\n') {
+	// 	strcpy(fpath, "/home/developer/dog_resized.jpg");
+	// }
+	strcpy(fpath, "/home/developer/dog_resized.jpg");
+	printf("\n Elaborating --> %s...\n\n", fpath);
 
 	config.isBMP = 1;
-	byte *dogbuffer = load_image_cv(fpath, &config.width, &config.height, &lr);
+	byte *dogbuffer = load_image_cv(fpath, &config.rows, &config.cols, &lr);
 
 	// unsigned int lr = 0;
 	// FILE*dog = fopen(fpath, "rb");
@@ -390,6 +397,7 @@ int main( int argc, char** argv )
 	// fclose(dog);
 
 	if(ny2_init()) exit(ret);
+
 	elaborate_image(dogbuffer, lr, robj, 0);
 #endif
 	ny2_destroy();
