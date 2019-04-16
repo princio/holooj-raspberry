@@ -16,7 +16,9 @@
 #define NY2_OUTPUT_SIZE     (NY2_OUT_W*NY2_OUT_H*NY2_B_CELL*(NY2_COORDS + 1 + NY2_CLASSES))
 
 
-extern float *yolo_input;
+extern float*       ny2_input;
+extern int          ny2_names[80];
+extern const char   ny2_categories[626];
 
 typedef struct box{
     float x, y, w, h;
@@ -32,9 +34,9 @@ typedef struct detection{
 
 typedef struct rec_object{
     box bbox;
-    float prob;
     float objectness;
-    char name[28];
+    float prob;
+    int cindex;
 } rec_object;
 
 

@@ -17,6 +17,11 @@
 #include <turbojpeg.h>
 #include <unistd.h>
 
+#ifdef OPENCV
+#include <cv.h>
+#include <highgui.h>
+#endif
+
 #include "socket.h"
 #include "ny2.h"
 
@@ -118,10 +123,9 @@ int save_image_jpeg(byte *im, int index) {
     imjl = 200000;
     imj = tjAlloc((int) imjl);
     tjh = tjInitCompress();
-    ret = tjCompress2(tjh, im, config.rows, config.cols, config.cols, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
+    ret = tjCompress2(tjh, im, config.cols, 3*config.cols, config.rows, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
     RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
     RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
-
     char filename[30];
     sprintf(filename, "./phs/ph_%d.jpg", index);
     FILE *f = fopen(filename, "wb");
@@ -130,6 +134,7 @@ int save_image_jpeg(byte *im, int index) {
     RIFE(ret < imjl, Generic, File, "(fwrite error: %d instead of %lu)", ret, imjl);
     RIFE(fclose(f), Generic, File, "(fclose error)");
 
+	tjFree(imj);
     return 0;
 }
 
@@ -159,6 +164,7 @@ void draw_bbox(byte *im, box b, byte color[3]) {
         for(int wh = 0; wh <= thickness; wh++) {
             int border_line = wh*w*3;
             memcpy(&im[k + top_row - border_line], color, 3);
+			//TODO invalid write of size 1 vvvv
             memcpy(&im[k + bot_row + border_line], color, 3);
         }
     }
@@ -227,7 +233,18 @@ int socket_recv_config() {
 	printf("Buffer size set to %d.\n", buffer_size);
 
 	if(socket_wait_data(SEND)) return -1;
-	ret = send(sockfd_read, &config.STX, 4, 0);
+
+	int c = NY2_CLASSES;
+	int cl = sizeof(ny2_categories);
+	byte cbuf[cl];
+
+	memcpy(cbuf,		&config.STX, 	4);
+	memcpy(cbuf + 4,	&cl, 			4);
+	memcpy(cbuf + 8,	&c, 	4);
+	ret = send(sockfd_read, cbuf, 12, 0);
+
+	memcpy(cbuf, 	 	ny2_categories, cl);
+	ret = send(sockfd_read, cbuf, cl, 0);
 
 	return 0;
 }
@@ -253,21 +270,21 @@ int socket_wait_data(int rec) {
 int socket_receiving() {
 	// struct timespec sleep_time;
 	// sleep_time.tv_nsec=1*000*000; //1 ms
-
+	int nodata = 0;
 	RecvBuffer *rbuffer = calloc(buffer_size, 1);
 	SendBuffer sbuffer;
 
 	printf("Receiving started.\n");
 	while(1) {
 		int rl;
-
 		if(!socket_wait_data(RECV)) {
 			rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
+			printf("<-- %d\t", rl);
 			if(rl > 0) {
 				int nbbox = elaborate_packet(rbuffer, rl, &sbuffer);
 				if(nbbox >= 0) {
 					if(!socket_wait_data(SEND)) {
-						int sl = send(sockfd_read, &sbuffer, 8 + nbbox*sizeof(rec_object), 0);
+						int sl = send(sockfd_read, &sbuffer, 12 + nbbox*sizeof(rec_object), 0);
 						if(sl <= 0) {
 							printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno),sl);
 							socket_errno = (SOError) SOSend;
@@ -276,6 +293,7 @@ int socket_receiving() {
 					}
 				}
 			} else if(rl == 0) {
+				if(++nodata == 10) break;;
 				printf("[Warning %s::%d]: recv return 0.\n", __FILE__, __LINE__);
 			} else {
 				printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno), rl);
@@ -284,6 +302,8 @@ int socket_receiving() {
 		}
 		usleep(1000000);
 	}
+	free(rbuffer);
+	return 0;
 }
 
 
@@ -294,11 +314,12 @@ int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
 
 	RIFE(packet->l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", packet->l + OH_SIZE, rl);
 
+	printf("##\t%-5d B\tindex=%-4d\n", packet->l, packet->index);
+
 	sbuffer->stx = STX;
 	sbuffer->index = packet->index;
 	sbuffer->n = elaborate_image(packet->image, packet->l, sbuffer->dets, sbuffer->index);
 
-	printf("##\t%-5d B\tindex=%-4d\tnbbox=%-d\r", packet->l, packet->index, sbuffer->n);
 
 	return sbuffer->n;
 }
@@ -322,15 +343,22 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
 	for(int i = nbbox-1; i >= 0; --i) {
 		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
 			index, nbbox - i,
-			robj[i].bbox.x, robj[i].bbox.y, robj[i].bbox.w, robj[i].bbox.h, robj[i].objectness, robj[i].prob, robj[i].name);
+			robj[i].bbox.x, robj[i].bbox.y, robj[i].bbox.w, robj[i].bbox.h, robj[i].objectness, robj[i].prob, &ny2_categories[ny2_names[robj[i].cindex]]);
 
 		draw_bbox(im, robj[i].bbox, color);
 	}
 	printf("\n");
 
 	if(nbbox >= 0) {
-		show_image_cv(im, "bibo2", config.rows, config.cols, 0);
-        save_image_jpeg(im, index);
+#ifdef OPENCV
+		IplImage *iplim = cvCreateImage(cvSize(config.cols, config.rows), IPL_DEPTH_8U, 3);
+  		memcpy(iplim->imageData, im, config.cols*config.rows*3);
+		cvShowImage("bibo", iplim);
+		cvUpdateWindow("bibo");
+		cvWaitKey(0);
+#endif
+		// show_image_cv(im, "bibo2", config.rows, config.cols, 0);
+        // save_image_jpeg(im, index);
 	}
 
 	return nbbox;
@@ -339,12 +367,15 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
 
 int main( int argc, char** argv )
 {
-    int ret;
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-	make_window("bibo", 512, 512);
+#ifdef OPENCV
+	cvNamedWindow("bibo", CV_WINDOW_NORMAL);
+	cvResizeWindow("bibo", 512, 512);
+#endif
 
 #ifdef SOCKET
+    int ret;
 	if(socket_start_server()) exit(socket_errno);
 	if(argc < 2) {
 		printf("Missing interface name: set to ");
@@ -354,7 +385,7 @@ int main( int argc, char** argv )
 	}
 	printf("<<%s>>.\n", iface);
 
-	if(ny2_init()) exit(ret);
+	if(ny2_init()) exit(1);
 
 	ret = 0;
 	while(1) {
@@ -366,41 +397,36 @@ int main( int argc, char** argv )
 		}
 		ret = socket_wait_connection(); if(ret) continue;
 		ret = socket_recv_config(); 	if(ret) continue;
-		ret = socket_receiving();		if(ret) continue;
+		ret = socket_receiving();		if(ret) continue; else break;
 	}
-#else
-	make_window("bibo2", 512, 512);
+#elif defined(OPENCV)
 	rec_object robj[5];
 	char fpath[100] = {0};
-	int sz = 100;
 	int lr;
-	// printf("Insert photo path: ");
-	// if (fgets (fpath, sz, stdin) == NULL) exit(-1);
-	// if(fpath[0] = '\n') {
-	// 	strcpy(fpath, "/home/developer/dog_resized.jpg");
-	// }
 	strcpy(fpath, "/home/developer/dog_resized.jpg");
 	printf("\n Elaborating --> %s...\n\n", fpath);
 
+	IplImage *mat = cvLoadImage(fpath, CV_LOAD_IMAGE_COLOR);
+	byte *dogbuffer = (byte*) mat->imageData;
+	lr = mat->height*mat->width*3;
+	config.rows = mat->height;
+	config.cols = mat->width;
 	config.isBMP = 1;
-	byte *dogbuffer = load_image_cv(fpath, &config.rows, &config.cols, &lr);
 
-	// unsigned int lr = 0;
-	// FILE*dog = fopen(fpath, "rb");
-    // if(dog == NULL) return -1;
+	cvNamedWindow("bibo2", CV_WINDOW_NORMAL);
+	cvResizeWindow("bibo2", 512, 512);
 
-    // fseek(dog, 0, SEEK_END);
-    // lr = ftell(dog);
-    // rewind(dog);
-	// byte dogbuffer[lr];
-    // size_t read_count = fread(dogbuffer, 1, lr, dog);
-	// fclose(dog);
-
-	if(ny2_init()) exit(ret);
+	if(ny2_init()) exit(1);
 
 	elaborate_image(dogbuffer, lr, robj, 0);
 #endif
-	ny2_destroy();
 
+#if defined(OPENCV) || defined(SOCKET)
+	ny2_destroy();
+#endif
+
+#ifdef OPENCV
+	cvDestroyAllWindows();
+#endif
 	return 0;
 }

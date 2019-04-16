@@ -24,6 +24,9 @@
         "yolov2.h": "c",
         "ncs.h": "c",
         "ncs_yolov2.h": "c",
-        "ny2.h": "c"
+        "ny2.h": "c",
+        "highgui.h": "c",
+        "cv.h": "c",
+        "array": "c"
     }
 }

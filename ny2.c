@@ -11,16 +11,21 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef OPENCV
+#include <cv.h>
+#include <highgui.h>
+#endif
+
 #define EXPIT(X)  (1 / (1 + exp(-(X))))
 
 
-int names[80];
-const char categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0train\0truck\0boat\0traffic light\0fire hydrant\0stop sign\0parking meter\0bench\0bird\0cat\0dog\0horse\0sheep\0cow\0elephant\0bear\0zebra\0giraffe\0backpack\0umbrella\0handbag\0tie\0suitcase\0frisbee\0skis\0snowboard\0sports ball\0kite\0baseball bat\0baseball glove\0skateboard\0surfboard\0tennis racket\0bottle\0wine glass\0cup\0fork\0knife\0spoon\0bowl\0banana\0apple\0sandwich\0orange\0broccoli\0carrot\0hot dog\0pizza\0donut\0cake\0chair\0sofa\0pottedplant\0bed\0diningtable\0toilet\0tvmonitor\0laptop\0mouse\0remote\0keyboard\0cell phone\0microwave\0oven\0toaster\0sink\0refrigerator\0book\0clock\0vase\0scissors\0teddy bear\0hair drier\0toothbrush";
+int ny2_names[80];
+const char ny2_categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0train\0truck\0boat\0traffic light\0fire hydrant\0stop sign\0parking meter\0bench\0bird\0cat\0dog\0horse\0sheep\0cow\0elephant\0bear\0zebra\0giraffe\0backpack\0umbrella\0handbag\0tie\0suitcase\0frisbee\0skis\0snowboard\0sports ball\0kite\0baseball bat\0baseball glove\0skateboard\0surfboard\0tennis racket\0bottle\0wine glass\0cup\0fork\0knife\0spoon\0bowl\0banana\0apple\0sandwich\0orange\0broccoli\0carrot\0hot dog\0pizza\0donut\0cake\0chair\0sofa\0pottedplant\0bed\0diningtable\0toilet\0tvmonitor\0laptop\0mouse\0remote\0keyboard\0cell phone\0microwave\0oven\0toaster\0sink\0refrigerator\0book\0clock\0vase\0scissors\0teddy bear\0hair drier\0toothbrush";
 
 const float yolo_biases[] = { 0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828 };
 
 float *yolo_output;
-float *yolo_input;
+float *ny2_input;
 
 detection *dets;
 
@@ -209,18 +214,14 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
                 detection d = dets[n];
                 rec_object *d2 = &robj[nbbox];
                 box b = d.bbox;
-                const char *c = &categories[names[k]];
-                int lc = strlen(c);
-
 
                 // printf("\n\n%2d|%2d\t%7.6f\t", n, k, d.prob[k]);
                 // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\t\t%s\n", b.x, b.y, b.w, b.h, c);
 
-                memcpy(&(d2->bbox), &(b), 16);    //BBOX
+                memcpy(&(d2->bbox), &(b), 16);  //BBOX
                 d2->objectness = d.objectness;  //OBJ
                 d2->prob = d.prob[k];           //Classness
-                memcpy(&(d2->name), c, lc);    //BBOX
-                d2->name[lc] = 0;
+                d2->cindex = k;                 //class-index
                 if(++nbbox == 5) return nbbox;
             }
         }
@@ -236,13 +237,13 @@ int ny2_init () {
     int j = -1;
     
     while(++i < 625) {
-        if(categories[i] == '\0') {
-            names[++j] = b;
+        if(ny2_categories[i] == '\0') {
+            ny2_names[++j] = b;
             b = i + 1;
         }
     }
 
-    yolo_input = calloc(NY2_INPUT_SIZE, sizeof(float));
+    ny2_input = calloc(NY2_INPUT_SIZE, sizeof(float));
     yolo_output = calloc(NY2_OUTPUT_SIZE, sizeof(float));
 
 
@@ -262,17 +263,22 @@ int ny2_init () {
 
 int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int const imw, int const imh, int const imc) {
 	int i = 0;
-    int l = imw*imh*imc;
     int letterbox = imc * imw * ((NY2_INPUT_W - imh) >> 1);
-	float *y = &yolo_input[letterbox];
+    int l = imw*imh*imc;
+	float *y = &ny2_input[letterbox];
 	while(i <= l-3) {
 		y[i] = image[i + 2] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
 		y[i] = image[i] / 255.;     ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
 		y[i] = image[i - 2] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
 	}
 
-	show_image_cv(yolo_input, "bibo", NY2_INPUT_W, NY2_INPUT_H, 1);
-
+#ifdef OPENCV
+    IplImage *iplim = cvCreateImage(cvSize(NY2_INPUT_W, NY2_INPUT_H), IPL_DEPTH_32F, 3);
+    memcpy(iplim->imageData, ny2_input, NY2_INPUT_SIZE*4);
+    cvShowImage("bibo2", iplim);
+    cvUpdateWindow("bibo2");
+    cvWaitKey(0);
+#endif
     return ny2_inference(robj, thresh, imw, imh);
 }
 
@@ -282,7 +288,7 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
 int ny2_inference(rec_object *robj, float thresh, const int imw, const int imh) {
 
 #ifdef NCS
-    if(ncs_inference(yolo_input, (NY2_INPUT_SIZE) << 2, yolo_output, (NY2_OUTPUT_SIZE) << 2)) return -1;
+    if(ncs_inference(ny2_input, (NY2_INPUT_SIZE) << 2, yolo_output, (NY2_OUTPUT_SIZE) << 2)) return -1;
 #else
     int i = -1;
     char s[20] = {0};
@@ -309,6 +315,6 @@ void ny2_destroy() {
         free(dets[i].prob);
     }
     free(yolo_output);
-    free(yolo_input);
+    free(ny2_input);
     free(dets);
 }

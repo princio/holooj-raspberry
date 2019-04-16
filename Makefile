@@ -2,25 +2,36 @@
 # This is what I use, uncomment if you know your arch and want to specify
 # ARCH= -gencode arch=compute_52,code=compute_52
 
-
+OPENCV=1
+#SOCKET=1
+NCS=1
 CC=gcc
 CPP=g++
 
-ENV=
-
 #common to both compiler and linker
-COMMON=-Iinclude/ -I. -DOPENCV `pkg-config --cflags opencv` 
+COMMON=-Iinclude/ -I.
+
 #only for compiler
 CFLAGS=-Wall -Wno-unused-result -Wno-unknown-pragmas -Wfatal-errors -O0 -g
 #only for linker
-LDFLAGS= -lmvnc -lm -ljpeg -lturbojpeg `pkg-config --libs opencv` -lstdc++ 
+LDFLAGS= -lmvnc -lm -ljpeg -lturbojpeg 
+ifdef OPENCV
+  COMMON += -DOPENCV `pkg-config --cflags opencv`
+  LDFLAGS += `pkg-config --libs opencv` -lstdc++
+endif
+ifdef SOCKET
+	COMMON += -DSOCKET
+endif
+ifdef NCS
+	COMMON += -DNCS
+endif
 
 CFLAGS+=$(OPTS)
 
 OBJDIR=./debug/objs/
 
 EXEC=./debug/gengi
-OBJ=ncs.o ny2.o  socket.o  image_opencv.o
+OBJ=ncs.o ny2.o  socket.o  #image_opencv.o
 
 OBJS = $(addprefix $(OBJDIR), $(OBJ))
 DEPS = $(wildcard ./*.h)
