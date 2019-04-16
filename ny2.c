@@ -2,6 +2,7 @@
 
 #include "ny2.h"
 #include "ncs.h"
+#include "socket.h"
 
 
 #include <float.h>
@@ -160,7 +161,7 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
     int b = 0;
     for (i = 0; i < wh; ++i){
         for(n = 0; n < NY2_B_CELL; ++n){
-            int obj_index  = b + NY2_CLASSES;  //entry_index(l, 0, n*yolo_w*yolo_h + i, yolo_coords);
+            int obj_index  = b + NY2_COORDS;  //entry_index(l, 0, n*yolo_w*yolo_h + i, yolo_coords);
             int box_index  = b;                //entry_index(l, 0, n*yolo_w*yolo_h + i, 0);
             int det_index = i + n*wh;           // det have the same size of output but reordered with struct
                                                 // det have size 13x13x5=845, total number of bboxes.
@@ -174,7 +175,7 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
             dets[det_index].bbox = get_region_box(yolo_output, n, box_index, i / NY2_OUT_W, i % NY2_OUT_W);
 
             
-            if(1 || scale > thresh) {
+            if(scale > thresh) {
                 dets[det_index].objectness = scale;
 
                 /** SOFTMAX **/
@@ -253,10 +254,11 @@ int ny2_init () {
         dets[i].prob = (float*) calloc(NY2_CLASSES, sizeof(float));
     }
 
+#ifdef NCS
     if(ncs_init()) return -1;
 
     if(ncs_load_nn("./yolo/yolov2-tiny.graph", "yolov2")) return -1;
-
+#endif
     return 0;
 }
 
@@ -265,11 +267,13 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
 	int i = 0;
     int l = imw*imh*imc;
 	float *y = &yolo_input[imc * imw * ((NY2_INPUT_H - imh) >> 1)];
-	while(i <= l) {
+	while(i <= l-3) {
 		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
 		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
 		y[i] = image[i] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
 	}
+
+	show_image_cv(yolo_input, "bibo", NY2_INPUT_W, NY2_INPUT_H, 1);
 
     return ny2_inference(robj, thresh, imw, imh);
 }
@@ -279,7 +283,7 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
  * */ 
 int ny2_inference(rec_object *robj, float thresh, const int imw, const int imh) {
 
-#ifndef NY2_TEST
+#ifdef NCS
     if(ncs_inference(yolo_input, (NY2_INPUT_SIZE) << 2, yolo_output, (NY2_OUTPUT_SIZE) << 2)) return -1;
 #else
     int i = -1;
@@ -300,6 +304,9 @@ int ny2_inference(rec_object *robj, float thresh, const int imw, const int imh) 
 
 
 void ny2_destroy() {
+#ifdef NCS
+    ncs_destroy();
+#endif
     for(int i = NY2_B_TOTAL-1; i >= 0; --i){
         free(dets[i].prob);
     }

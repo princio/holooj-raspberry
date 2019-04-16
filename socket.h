@@ -2,7 +2,7 @@
 #define __SOCKET_H__
 
 #include "ny2.h"
-#define NCS
+#define NCS2
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,8 +27,8 @@ typedef struct _SendBuffer
     rec_object dets[5];
 } SendBuffer;
 
-
-int show_image_cv(void* im, const char* name, int, int);
+byte* load_image_cv(char *filename, int *w, int *h, int *size);
+int show_image_cv(void* im, const char* name, int, int, int);
 void make_window(char *name, int w, int h);
 
 typedef enum {
@@ -68,7 +68,8 @@ typedef enum {
 } TjError;
 
 typedef enum {
-        ImWrongSize
+        ImWrongSize,
+        ImUnsopportedColorSpace
 } ImError;
 
 

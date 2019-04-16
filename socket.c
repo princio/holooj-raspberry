@@ -35,7 +35,7 @@ const int STX = 767590;
 const int OH_SIZE = 12;
 
 typedef struct Config {
-	char hello[8];
+	int STX;
 	int width;
 	int height;
 	int isBMP;
@@ -53,7 +53,7 @@ struct sockaddr_in server_addr;
 struct sockaddr_in holo_addr;
 struct timeval tv;
 struct timeval select_timer;
-float thresh = 0.3;
+float thresh = 0.5;
 int timeouts = 0;
 
 char iface[10] = "enp0s9";
@@ -100,8 +100,9 @@ int decode_jpeg(byte *imj, int imjl, byte *im) {
         case TJCS_YCbCr: printf("YCbCr"); break;
         case TJCS_YCCK: printf("YCCK"); break;
     }
-    ret = tjDecompress2(tjh, imj, imjl, im, 0, 0, 0, TJPF_RGB, 0);
-    RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
+	RIFE(cl != TJCS_RGB, Im, UnsopportedColorSpace, "");
+	ret = tjDecompress2(tjh, imj, imjl, im, 0, 0, 0, TJPF_RGB, 0);
+	RIFE(ret, Tj, Decompress, "(%s)", tjGetErrorStr());
     RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
 
     return 0;
@@ -117,7 +118,7 @@ int save_image_jpeg(byte *im, int index) {
     imjl = 200000;
     imj = tjAlloc((int) imjl);
     tjh = tjInitCompress();
-    ret = tjCompress2(tjh, im, config.width, 0, config.height, TJPF_BGR, &imj, &imjl, TJSAMP_444, 100, 0);
+    ret = tjCompress2(tjh, im, config.width, 0, config.height, TJPF_RGB, &imj, &imjl, TJSAMP_444, 100, 0);
     RIFE(ret, Tj, Compress, "(%s)", tjGetErrorStr());
     RIFE(tjDestroy(tjh), Tj, Destroy, "(%s)", tjGetErrorStr());
 
@@ -214,12 +215,15 @@ int socket_recv_config() {
 	ret = recv(sockfd_read, &config, sizeof(Config), 0); //REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
 	RIFE(ret <= 0, SO, Recv, "(%d)", ret);
 
-	printf("%s\t%dx%d, %s\n", config.hello, config.width, config.height, config.isBMP ? "BMP" : "JPEG");
+	printf("%d\t%dx%d, %s\n", config.STX, config.width, config.height, config.isBMP ? "BMP" : "JPEG");
 
 	buffer_size = (OH_SIZE + config.width*config.height*3) >> (config.isBMP ? 0 : 4);
 	image_size = config.width*config.height*3;
 
 	printf("Buffer size set to %d.\n", buffer_size);
+
+	if(socket_wait_data(SEND)) return -1;
+	ret = send(sockfd_read, &config.STX, 4, 0);
 
 	return 0;
 }
@@ -324,9 +328,6 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
         save_image_jpeg(im, index);
 	}
 
-#ifdef SHOWIMAGE
-	show_image_cv(im, "bibo", config.width, config.height);
-#endif
 	return nbbox;
 }	
 
@@ -336,34 +337,10 @@ int main( int argc, char** argv )
     int ret;
 	setvbuf(stdout, NULL, _IONBF, 0);
 
-#ifdef SHOWIMAGE
 	make_window("bibo", 512, 512);
-#endif
 
-	if((ret = ny2_init())) exit(ret);
+#ifdef SOCKET
 	if(socket_start_server()) exit(socket_errno);
-
-#ifndef NCS
-	FILE*f = fopen("/home/developer/dog.jpg", "rb");
-	fseek(f, 0, SEEK_END);
-	unsigned long l = (unsigned long) ftell(f);
-	fseek(f, 0, SEEK_SET);
-
-
-	byte packet[l + OH_SIZE];
-	memcpy(&packet[0], &STX, 4);
-	memcpy(&packet[4], &l, 4);
-	int index = 897;
-	memcpy(&packet[8], &index, 4);
-
-	image_size = 416*416*3;
-	fread(&packet[OH_SIZE], l, 1, f);
-	fclose(f);
-
-	int sl;
-	byte sbuffer[100] = {0};
-	elaborate_packet(packet, l + OH_SIZE, sbuffer, &sl);
-#else
 	if(argc < 2) {
 		printf("Missing interface name: set to ");
 	} else {
@@ -372,21 +349,49 @@ int main( int argc, char** argv )
 	}
 	printf("<<%s>>.\n", iface);
 
+	if(ny2_init()) exit(ret);
+
+	ret = 0;
 	while(1) {
-		if(
-			socket_wait_connection() ||
-			socket_recv_config()		 ||
-			socket_receiving() ) {
+		if(ret) {
 			if(close(sockfd_read)) {
 				printf("\nError during closing [errno=%d].\n", errno);
 				break;
 			}
-		} else {
-			break;
 		}
+		ret = socket_wait_connection(); if(ret) continue;
+		ret = socket_recv_config(); 	if(ret) continue;
+		ret = socket_receiving();		if(ret) continue;
 	}
-#endif
+#else
+	rec_object robj[5];
+	char fpath[100] = {0};
+	int sz = 100;
+	int lr;
+	printf("Insert photo path: ");
+	if (fgets (fpath, sz, stdin) == NULL) exit(-1);
+	if(fpath[0] = '\n') {
+		strcpy(fpath, "/home/developer/dog.jpg");
+	}
+	printf("\n Elaborating --> %s...", fpath);
 
+	config.isBMP = 1;
+	byte *dogbuffer = load_image_cv(fpath, &config.width, &config.height, &lr);
+
+	// unsigned int lr = 0;
+	// FILE*dog = fopen(fpath, "rb");
+    // if(dog == NULL) return -1;
+
+    // fseek(dog, 0, SEEK_END);
+    // lr = ftell(dog);
+    // rewind(dog);
+	// byte dogbuffer[lr];
+    // size_t read_count = fread(dogbuffer, 1, lr, dog);
+	// fclose(dog);
+
+	if(ny2_init()) exit(ret);
+	elaborate_image(dogbuffer, lr, robj, 0);
+#endif
 	ny2_destroy();
 
 	return 0;
