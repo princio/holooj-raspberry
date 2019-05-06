@@ -71,8 +71,13 @@ typedef enum {
 
 #define RIFE( expr, mask, code, msg, ... )\
     if((expr)) {\
-	printf("\n[%s::%d]\t"#mask" "#code"\t(errno#%d=%s)"msg".\n\n", __FILE__, __LINE__, errno, strerror(errno), ##__VA_ARGS__);\
-	socket_errno = (mask##Error) mask##code;\
+        if(!strcmp(#mask, "SO")) {\
+            printf("\n[%s::%d]\t"#mask" "#code"\t(errno#%d=%s)"msg".\n\n", __FILE__, __LINE__, errno, strerror(errno), ##__VA_ARGS__);\
+            socket_errno = (mask##Error) mask##code;\
+        } else {\
+            printf("\n[%s::%d]\t"#mask" "#code"\t"msg".\n\n", __FILE__, __LINE__, ##__VA_ARGS__);\
+            socket_errno = (mask##Error) mask##code;\
+        }\
 	return -1;\
     }
 

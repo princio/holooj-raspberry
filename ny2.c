@@ -277,7 +277,8 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
     memcpy(iplim->imageData, ny2_input, NY2_INPUT_SIZE*4);
     cvShowImage("bibo2", iplim);
     cvUpdateWindow("bibo2");
-    cvWaitKey(0);
+    cvReleaseImage(&iplim);
+    // cvWaitKey(0);
 #endif
     return ny2_inference(robj, thresh, imw, imh);
 }

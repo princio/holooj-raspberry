@@ -2,9 +2,10 @@
 # This is what I use, uncomment if you know your arch and want to specify
 # ARCH= -gencode arch=compute_52,code=compute_52
 
-OPENCV=1
-#SOCKET=1
+#OPENCV=1
+SOCKET=1
 NCS=1
+
 CC=gcc
 CPP=g++
 
@@ -37,7 +38,7 @@ OBJS = $(addprefix $(OBJDIR), $(OBJ))
 DEPS = $(wildcard ./*.h)
 
 
-all: obj clean $(EXEC)
+all: clean obj $(EXEC)
 #all: obj  results $(SLIB) $(ALIB) $(EXEC)
 
 $(info $(OBJS))

@@ -61,7 +61,7 @@ struct timeval select_timer;
 float thresh = 0.5;
 int timeouts = 0;
 
-char iface[10] = "enp0s9";
+char iface[10] = "enp0s8";
 
 
 
@@ -154,13 +154,13 @@ void draw_bbox(byte *im, box b, byte color[3]) {
     if(left < 0) left = thickness;
     if(right > w-thickness) right = w-thickness;
     if(top < 0) top = thickness;
-    if(bot > h-thickness) bot = h-thickness;
+    if(bot >= h-thickness) bot = h-thickness;
 
     int top_row = 3*top*w;
     int bot_row = 3*bot*w;
     int left_col = 3*left;
     int right_col = 3*right;
-    for(int k = left_col; k <= right_col; k+=3) {
+    for(int k = left_col; k < right_col; k+=3) {
         for(int wh = 0; wh <= thickness; wh++) {
             int border_line = wh*w*3;
             memcpy(&im[k + top_row - border_line], color, 3);
@@ -170,7 +170,7 @@ void draw_bbox(byte *im, box b, byte color[3]) {
     }
 	int pixel_left = top*3*w + left_col;
 	int pixel_right = top*3*w + right_col;
-    for(int k = top; k <= bot; k++) {
+    for(int k = top; k < bot; k++) {
         for(int wh = 0; wh <= thickness*3; wh+=3) {
             memcpy(&im[pixel_left  - wh], color, 3);
             memcpy(&im[pixel_right + wh], color, 3);
@@ -267,7 +267,7 @@ int socket_wait_data(int rec) {
 }
 
 
-int socket_receiving() {
+int socket_recv() {
 	// struct timespec sleep_time;
 	// sleep_time.tv_nsec=1*000*000; //1 ms
 	int nodata = 0;
@@ -279,12 +279,13 @@ int socket_receiving() {
 		int rl;
 		if(!socket_wait_data(RECV)) {
 			rl = recv(sockfd_read, rbuffer, buffer_size, config.isBMP ? MSG_WAITALL : 0);
-			printf("<-- %d\t", rl);
+			printf("<----%5d\t%5d | %5d\n", rl, rbuffer->index, rbuffer->l);
 			if(rl > 0) {
 				int nbbox = elaborate_packet(rbuffer, rl, &sbuffer);
 				if(nbbox >= 0) {
 					if(!socket_wait_data(SEND)) {
 						int sl = send(sockfd_read, &sbuffer, 12 + nbbox*sizeof(rec_object), 0);
+						printf("---->%-5d\t%5d | %5d\n\n", sl, sbuffer.index, sbuffer.n);
 						if(sl <= 0) {
 							printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno),sl);
 							socket_errno = (SOError) SOSend;
@@ -293,17 +294,18 @@ int socket_receiving() {
 					}
 				}
 			} else if(rl == 0) {
-				if(++nodata == 10) break;;
+				if(++nodata == 10) break;
 				printf("[Warning %s::%d]: recv return 0.\n", __FILE__, __LINE__);
 			} else {
 				printf("\n[%s::%d]\t""SO"" ""Send""\t(errno#%d=%s)""(%d)"".\n\n", __FILE__, __LINE__, errno, strerror(errno), rl);
 				socket_errno = (SOError) SOSend;
+				break;
 			}
 		}
 		usleep(1000000);
 	}
 	free(rbuffer);
-	return 0;
+	return -1;
 }
 
 
@@ -313,8 +315,6 @@ int elaborate_packet(RecvBuffer *packet, int rl, SendBuffer *sbuffer) {
 
 
 	RIFE(packet->l + OH_SIZE > rl, Pck, TooSmall, "(%d > %d).", packet->l + OH_SIZE, rl);
-
-	printf("##\t%-5d B\tindex=%-4d\n", packet->l, packet->index);
 
 	sbuffer->stx = STX;
 	sbuffer->index = packet->index;
@@ -341,13 +341,11 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
 
     byte color[3] = {250, 0, 0};
 	for(int i = nbbox-1; i >= 0; --i) {
-		printf("%5d#%d) x=%7.6f | y=%7.6f | w=%7.6f | h=%7.6f\to=%7.6f | p=%7.6f\t\t%s\n",
-			index, nbbox - i,
+		printf("\t(%7.6f, %7.6f, %7.6f, %7.6f), o=%7.6f, p=%7.6f:\t\t%s\n",
 			robj[i].bbox.x, robj[i].bbox.y, robj[i].bbox.w, robj[i].bbox.h, robj[i].objectness, robj[i].prob, &ny2_categories[ny2_names[robj[i].cindex]]);
 
-		draw_bbox(im, robj[i].bbox, color);
+		//draw_bbox(im, robj[i].bbox, color);
 	}
-	printf("\n");
 
 	if(nbbox >= 0) {
 #ifdef OPENCV
@@ -355,10 +353,11 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
   		memcpy(iplim->imageData, im, config.cols*config.rows*3);
 		cvShowImage("bibo", iplim);
 		cvUpdateWindow("bibo");
-		cvWaitKey(0);
+		// cvWaitKey(10);
+	    cvReleaseImage(&iplim);
 #endif
 		// show_image_cv(im, "bibo2", config.rows, config.cols, 0);
-        // save_image_jpeg(im, index);
+        save_image_jpeg(im, index);
 	}
 
 	return nbbox;
@@ -387,9 +386,9 @@ int main( int argc, char** argv )
 
 	if(ny2_init()) exit(1);
 
-	ret = 0;
+	ret = INT32_MAX;
 	while(1) {
-		if(ret) {
+		if(ret != INT32_MAX) {
 			if(close(sockfd_read)) {
 				printf("\nError during closing [errno=%d].\n", errno);
 				break;
@@ -397,7 +396,7 @@ int main( int argc, char** argv )
 		}
 		ret = socket_wait_connection(); if(ret) continue;
 		ret = socket_recv_config(); 	if(ret) continue;
-		ret = socket_receiving();		if(ret) continue; else break;
+		ret = socket_recv();		if(ret) continue; else break;
 	}
 #elif defined(OPENCV)
 	rec_object robj[5];
