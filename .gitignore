@@ -2,7 +2,6 @@ debug/
 .vscode/ipch/
 main_prova/
 out.txt
-yolo/
 *.out
 MakefileUno
 mov1.cpp
