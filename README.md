@@ -39,7 +39,7 @@ mvNCCompile yolov2.pb -s 12 -in input -on output -o yolov2.graph
 ```
 Restore swap size:
 ```bash
-sudo perl -pi -e 's/CONF_SWAPSIZE=\d+/CONF_SWAPSIZE=100/'  dphys-swapfile
+sudo perl -pi -e 's/CONF_SWAPSIZE=\d+/CONF_SWAPSIZE=100/'  /etc/dphys-swapfile
 ```
 
 ### Execute:
