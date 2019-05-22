@@ -393,7 +393,7 @@ int main( int argc, char** argv )
 		}
 	}
 	if(!strcmp(graph, "none")) {
-		strcpy(graph, "./yolo/yolov2-tiny.graph");
+		strcpy(graph, "./yolo/original/yolov2-tiny-original.graph");
 		printf("Graph missing: default to %s\n", graph);
 	}
 	if(!strcmp(iface, "none")) {
