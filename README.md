@@ -22,13 +22,15 @@ On a Linux machine, not Raspberry, install Darkflow and execute:
 flow --model yolov2.cfg --load yolov2.weights  --savepb
 ```
 
-##Execute:
+### Execute:
 
 In holooj-raspberry root folder:
 ```bash
 ./debug/gengi --iface wlan0 --graph ./yolo/yolov2-tiny.graph
 ```
 where:
+```
         --graph                 the path to the graph.
         --iface                 the network interface to use.
         --help, -h              this help.
+```
