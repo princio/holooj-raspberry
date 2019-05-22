@@ -40,7 +40,7 @@ typedef struct rec_object{
 } rec_object;
 
 
-int  ny2_init();
+int  ny2_init(const char *graph);
 int  ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int const imw, int const imh, int const imc);
 int  ny2_inference(rec_object *robj, float thresh, int const imw, int const imh);
 void ny2_destroy();

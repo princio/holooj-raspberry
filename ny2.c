@@ -230,7 +230,7 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
 }
 
 
-int ny2_init () {
+int ny2_init (const char* graph) {
     
     int b = 0;
     int i = -1;
@@ -255,7 +255,7 @@ int ny2_init () {
 #ifdef NCS
     if(ncs_init()) return -1;
 
-    if(ncs_load_nn("./yolo/yolov2-tiny.graph", "yolov2")) return -1;
+    if(ncs_load_nn(graph, "yolov2")) return -1;
 #endif
     return 0;
 }

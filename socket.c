@@ -5,17 +5,20 @@
  *      Author: developer
  */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <arpa/inet.h>
-#include <sys/types.h>
+#include <errno.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #include <sys/poll.h>
+#include <sys/types.h>
 #include <ifaddrs.h>
 #include <string.h>
-#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <turbojpeg.h>
 #include <unistd.h>
+
 
 #ifdef OPENCV
 #include <cv.h>
@@ -61,7 +64,8 @@ struct timeval select_timer;
 float thresh = 0.5;
 int timeouts = 0;
 
-char iface[10] = "enp0s8";
+char iface[10] = "enp0s3";
+
 
 
 
@@ -70,16 +74,16 @@ int elaborate_image(byte *imbuffer, int iml, rec_object dets[5], int index);
 int socket_wait_data(int rec);
 
 
-int get_address(in_addr_t *addr, char *iface) {
+int get_address(struct in_addr *addr, char *iface) {
 
 	struct ifaddrs *ifaddr, *ifa;
 	RIFE(-1 == getifaddrs(&ifaddr), SO, Addr, "");
 
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		int condition = !strcmp(ifa->ifa_name, iface) && ifa->ifa_addr && (ifa->ifa_addr->sa_family == AF_INET);
+
+		addr->s_addr = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
 	    if (condition) {
-			printf("addr = %s\n", inet_ntoa(((struct sockaddr_in *)ifa->ifa_addr)->sin_addr));
-	        *addr = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
 	        break;
 	    }
 	}
@@ -189,11 +193,11 @@ int socket_start_server() {
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(PORT_IN);
 
-	if(get_address(&server_addr.sin_addr.s_addr, iface)) return -1;
+	if(get_address(&server_addr.sin_addr, iface)) return -1;
 
 	RIFE(0>bind(sockfd_server, (struct sockaddr *) &server_addr, sizeof(server_addr)), SO, Bind, "");
 
-	printf("start listening on port %d.\n", PORT_IN);
+	printf("start listening interface %s on %s:%d.\n", iface, inet_ntoa(server_addr.sin_addr), PORT_IN);
 
 	RIFE(0>listen(sockfd_server, 3), SO, Listening, "");
 
@@ -368,6 +372,35 @@ int main( int argc, char** argv )
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
+	if(argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
+		printf("HoloOj for Raspberry.\n\t--graph\t\t\tthe path to the graph.\n\t--iface\t\t\tthe network interface to use.\n\t--help, -h\t\tthis help.\n");
+		exit(0);
+	}
+	char graph[100];
+
+	strcpy(graph, "none");
+	strcpy(iface, "none");
+	if(argc >= 3) {
+		for(int i = 1; i < argc; i++) {
+			if(!strcmp(argv[i], "--iface")) {
+				strcpy(iface, argv[i+1]);
+				printf("Iface set to: %s\n", iface);
+			}
+			if(!strcmp(argv[i], "--graph")) {
+				strcpy(graph, argv[i+1]);
+				printf("Graph set to: %s\n", graph);
+			}
+		}
+	}
+	if(!strcmp(graph, "none")) {
+		strcpy(graph, "./yolo/yolov2-tiny.graph");
+		printf("Graph missing: default to %s\n", graph);
+	}
+	if(!strcmp(iface, "none")) {
+		strcpy(iface, "wlan0");
+		printf("Iface missing: default to %s\n", iface);
+	}
+	
 #ifdef OPENCV
 	cvNamedWindow("bibo", CV_WINDOW_NORMAL);
 	cvResizeWindow("bibo", 512, 512);
@@ -376,15 +409,8 @@ int main( int argc, char** argv )
 #ifdef SOCKET
     int ret;
 	if(socket_start_server()) exit(socket_errno);
-	if(argc < 2) {
-		printf("Missing interface name: set to ");
-	} else {
-		strcpy(iface, argv[1]);
-		printf("Interface set to ");
-	}
-	printf("<<%s>>.\n", iface);
 
-	if(ny2_init()) exit(1);
+	if(ny2_init(graph)) exit(1);
 
 	ret = INT32_MAX;
 	while(1) {
