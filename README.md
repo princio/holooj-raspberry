@@ -4,7 +4,7 @@
 
 
 ```bash
-#libraries requried from holooj
+#libraries required from holooj
 sudo apt install git libusb-1.0-0-dev libturbojpeg0-dev
 
 #ncsdk only api
