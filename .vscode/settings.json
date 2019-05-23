@@ -28,5 +28,6 @@
         "highgui.h": "c",
         "cv.h": "c",
         "array": "c"
-    }
+    },
+    "C_Cpp.errorSquiggles": "Disabled"
 }

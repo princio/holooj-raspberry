@@ -64,11 +64,6 @@ struct timeval select_timer;
 float thresh = 0.5;
 int timeouts = 0;
 
-char iface[10] = "enp0s3";
-
-
-
-
 int elaborate_packet(RecvBuffer *rbuffer, int rl, SendBuffer *sbuffer);
 int elaborate_image(byte *imbuffer, int iml, rec_object dets[5], int index);
 int socket_wait_data(int rec);
@@ -185,7 +180,7 @@ void draw_bbox(byte *im, box b, byte color[3]) {
 }
 
 
-int socket_start_server() {
+int socket_start_server(const char *iface) {
 	sockfd_server = socket(AF_INET, SOCK_STREAM, 0);
 	RIFE(0>sockfd_server, SO, Creation, "");
 
@@ -367,8 +362,26 @@ int elaborate_image(byte *imbuffer, int iml, rec_object robj[5], int index) {
 	return nbbox;
 }	
 
+int socket_run(const char iface, const char *graph, const char *cfg) {
+	int ret;
+	if(socket_start_server(iface)) exit(socket_errno);
 
-int main( int argc, char** argv )
+
+	ret = INT32_MAX;
+	while(1) {
+		if(ret != INT32_MAX) {
+			if(close(sockfd_read)) {
+				printf("\nError during closing [errno=%d].\n", errno);
+				break;
+			}
+		}
+		ret = socket_wait_connection(); if(ret) continue;
+		ret = socket_recv_config(); 	if(ret) continue;
+		ret = socket_recv();		if(ret) continue; else break;
+	}
+}
+
+int main2( int argc, char** argv )
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -404,46 +417,6 @@ int main( int argc, char** argv )
 #ifdef OPENCV
 	cvNamedWindow("bibo", CV_WINDOW_NORMAL);
 	cvResizeWindow("bibo", 512, 512);
-#endif
-
-#ifdef SOCKET
-    int ret;
-	if(socket_start_server()) exit(socket_errno);
-
-	if(ny2_init(graph)) exit(1);
-
-	ret = INT32_MAX;
-	while(1) {
-		if(ret != INT32_MAX) {
-			if(close(sockfd_read)) {
-				printf("\nError during closing [errno=%d].\n", errno);
-				break;
-			}
-		}
-		ret = socket_wait_connection(); if(ret) continue;
-		ret = socket_recv_config(); 	if(ret) continue;
-		ret = socket_recv();		if(ret) continue; else break;
-	}
-#elif defined(OPENCV)
-	rec_object robj[5];
-	char fpath[100] = {0};
-	int lr;
-	strcpy(fpath, "/home/developer/dog_resized.jpg");
-	printf("\n Elaborating --> %s...\n\n", fpath);
-
-	IplImage *mat = cvLoadImage(fpath, CV_LOAD_IMAGE_COLOR);
-	byte *dogbuffer = (byte*) mat->imageData;
-	lr = mat->height*mat->width*3;
-	config.rows = mat->height;
-	config.cols = mat->width;
-	config.isBMP = 1;
-
-	cvNamedWindow("bibo2", CV_WINDOW_NORMAL);
-	cvResizeWindow("bibo2", 512, 512);
-
-	if(ny2_init()) exit(1);
-
-	elaborate_image(dogbuffer, lr, robj, 0);
 #endif
 
 #if defined(OPENCV) || defined(SOCKET)

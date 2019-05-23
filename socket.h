@@ -69,6 +69,9 @@ typedef enum {
 } ImError;
 
 
+int socket_run(const char*, const char*, const char*);
+
+
 #define RIFE( expr, mask, code, msg, ... )\
     if((expr)) {\
         if(!strcmp(#mask, "SO")) {\
