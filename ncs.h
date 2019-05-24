@@ -1,12 +1,10 @@
 #ifndef __MOVIDIUS_H__
 #define __MOVIDIUS_H__
 
-int ncs_init();
-int ncs_load_nn(const char*, const char*);
 
-int ncs_inference(float *in, unsigned int in_size_bytes, float *out, int out_size_bytes);
-
-int ncs_destroy();
+typedef enum {
+	NCSNN_YOLOv2
+} NCSNNType;
 
 typedef enum { 
     NCSDevCreateError,
@@ -18,7 +16,62 @@ typedef enum {
 	NCSFifoReadError,
 	NCSDestroyError,
     NCSReadGraphFileError,
-    NCSTooFewBytesError
+    NCSTooFewBytesError,
+    NCSParseError
 } NCSerror;
+
+
+typedef struct box{
+    float x, y, w, h;
+} box;
+
+typedef struct bbox{
+    box box;
+    float objectness;
+    float prob;
+    int cindex;
+} bbox;
+
+typedef struct detection{
+    box bbox;
+    int classes;
+    float *prob;
+    float objectness;
+    int sort_class;
+} detection;
+
+typedef struct nnet {
+	char name[10];
+    NCSNNType type;
+    float thresh;
+    int in_w;
+    int in_h;
+    int in_c;
+    int im_cols;
+    int im_rows;
+    int out_w;
+    int out_h;
+    int out_z;
+    int nbbox;
+    int nbbox_total;
+    int ncoords;
+    int nclasses;
+    int nanchors;
+    int input_size_byte;
+    int output_size_byte;
+    char *classes_buffer;
+    char **classes;
+    float *anchors;
+    float *output;
+    float *input;
+    detection *dets;
+    bbox *bboxes;
+} nnet;
+
+int ncs_init(const char*, const char*, NCSNNType, nnet *nn);
+
+int ncs_inference(int nbboxes_max);
+
+int ncs_destroy();
 
 #endif //__MOVIDIUS_H__

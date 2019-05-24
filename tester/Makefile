@@ -2,7 +2,7 @@
 # This is what I use, uncomment if you know your arch and want to specify
 # ARCH= -gencode arch=compute_52,code=compute_52
 
-#OPENCV=1
+OPENCV=1
 SOCKET=1
 NCS=1
 
@@ -29,10 +29,10 @@ endif
 
 CFLAGS+=$(OPTS)
 
-OBJDIR=./debug/objs/
+OBJDIR=./
 
-EXEC=./debug/gengi
-OBJ=ncs.o ny2.o  socket.o  main.o#image_opencv.o
+EXEC=./test
+OBJ=main.o
 
 OBJS = $(addprefix $(OBJDIR), $(OBJ))
 DEPS = $(wildcard ./*.h)

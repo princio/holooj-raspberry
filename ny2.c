@@ -19,15 +19,7 @@
 #define EXPIT(X)  (1 / (1 + exp(-(X))))
 
 
-int ny2_names[80];
-const char ny2_categories[626] = "person\0bicycle\0car\0motorbike\0aeroplane\0bus\0train\0truck\0boat\0traffic light\0fire hydrant\0stop sign\0parking meter\0bench\0bird\0cat\0dog\0horse\0sheep\0cow\0elephant\0bear\0zebra\0giraffe\0backpack\0umbrella\0handbag\0tie\0suitcase\0frisbee\0skis\0snowboard\0sports ball\0kite\0baseball bat\0baseball glove\0skateboard\0surfboard\0tennis racket\0bottle\0wine glass\0cup\0fork\0knife\0spoon\0bowl\0banana\0apple\0sandwich\0orange\0broccoli\0carrot\0hot dog\0pizza\0donut\0cake\0chair\0sofa\0pottedplant\0bed\0diningtable\0toilet\0tvmonitor\0laptop\0mouse\0remote\0keyboard\0cell phone\0microwave\0oven\0toaster\0sink\0refrigerator\0book\0clock\0vase\0scissors\0teddy bear\0hair drier\0toothbrush";
-
-const float yolo_biases[] = { 0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828 };
-
-float *yolo_output;
-float *ny2_input;
-
-detection *dets;
+nnet *nn;
 
 float overlap(float x1, float w1, float x2, float w2)
 {
@@ -61,14 +53,17 @@ float box_iou(box a, box b)
     return box_intersection(a, b)/box_union(a, b);
 }
 
-void correct_region_boxes(int w, int h)
+void correct_region_boxes()
 {
     int i;
-    int netw = NY2_INPUT_W;
-    int neth = NY2_INPUT_H;
+    int netw = nn->in_w;
+    int neth = nn->in_h;
 
-    int new_w=0;
-    int new_h=0;
+    int new_w= 0;
+    int new_h= 0;
+
+    int w = nn->im_cols;
+    int h = nn->im_rows;
     if (((float)netw/w) < ((float)neth/h)) {
         new_w = netw;
         new_h = (h * netw)/w;
@@ -76,16 +71,16 @@ void correct_region_boxes(int w, int h)
         new_h = neth;
         new_w = (w * neth)/h;
     }
-    for (i = 0; i < NY2_B_TOTAL; ++i){
-        if(dets[i].prob[16] > 0.5) {
+    for (i = 0; i < nn->nbbox_total; ++i){
+        if(nn->dets[i].prob[16] > 0.5) {
             printf("\b");
         }
-        box b = dets[i].bbox;
+        box b = nn->dets[i].bbox;
         b.x =  (b.x - (netw - new_w)/2./netw) / ((float)new_w/netw); 
         b.y =  (b.y - (neth - new_h)/2./neth) / ((float)new_h/neth); 
         b.w *= (float)netw/new_w;
         b.h *= (float)neth/new_h;
-        dets[i].bbox = b;
+        nn->dets[i].bbox = b;
     }
 }
 
@@ -113,31 +108,31 @@ void do_nms_sort()
 {
     float thresh = .45; // like in darknet:detector#575
     int i, j, k;
-    int total = NY2_B_TOTAL;
+    int total = nn->nbbox_total;
     k = (total)-1;
     for(i = 0; i <= k; ++i){
-        if(dets[i].objectness == 0){
-            detection swap = dets[i];
-            dets[i] = dets[k];
-            dets[k] = swap;
+        if(nn->dets[i].objectness == 0){
+            detection swap = nn->dets[i];
+            nn->dets[i] = nn->dets[k];
+            nn->dets[k] = swap;
             --k;
             --i;
         }
     }
     total = k+1;
 
-    for(k = 0; k < NY2_CLASSES; ++k){
+    for(k = 0; k < nn->nclasses; ++k){
         for(i = 0; i < total; ++i){
-            dets[i].sort_class = k;
+            nn->dets[i].sort_class = k;
         }
-        qsort(dets, total, sizeof(detection), nms_comparator);
+        qsort(nn->dets, total, sizeof(detection), nms_comparator);
         for(i = 0; i < total; ++i){
-            if(dets[i].prob[k] == 0) continue;
-            box a = dets[i].bbox;
+            if(nn->dets[i].prob[k] == 0) continue;
+            box a = nn->dets[i].bbox;
             for(j = i+1; j < total; ++j){
-                box b = dets[j].bbox;
+                box b = nn->dets[j].bbox;
                 if (box_iou(a, b) > thresh){
-                    dets[j].prob[k] = 0;
+                    nn->dets[j].prob[k] = 0;
                 }
             }
         }
@@ -147,44 +142,43 @@ void do_nms_sort()
 box get_region_box(float *x, int n, int index, int i, int j)
 {
     box b;
-    b.x = (j + EXPIT(x[index])) / NY2_OUT_W;
-    b.y = (i + EXPIT(x[index+1])) / NY2_OUT_H;
-    b.w = exp(x[index + 2]) * yolo_biases[2*n]   / NY2_OUT_W;
-    b.h = exp(x[index + 3]) * yolo_biases[2*n+1] / NY2_OUT_H;
+    b.x = (j + EXPIT(x[index])) / nn->out_w;
+    b.y = (i + EXPIT(x[index+1])) / nn->out_h;
+    b.w = exp(x[index + 2]) * nn->anchors[2*n]   / nn->out_w;
+    b.h = exp(x[index + 3]) * nn->anchors[2*n+1] / nn->out_h;
     return b;
 }
 
-
-int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
+int get_bboxes(int nbboxes_max)
 {
     int i,j,n, nbbox;
-    int wh = NY2_OUT_W*NY2_OUT_H;
+    int wh = nn->out_w * nn->out_h;
     int b = 0;
     for (i = 0; i < wh; ++i){
-        for(n = 0; n < NY2_B_CELL; ++n){
-            int obj_index  = b + NY2_COORDS;  //entry_index(l, 0, n*yolo_w*yolo_h + i, yolo_coords);
+        for(n = 0; n < nn->nbbox; ++n){
+            int obj_index  = b + nn->ncoords;  //entry_index(l, 0, n*yolo_w*yolo_h + i, yolo_coords);
             int box_index  = b;                //entry_index(l, 0, n*yolo_w*yolo_h + i, 0);
             int det_index = i + n*wh;           // det have the same size of output but reordered with struct
                                                 // det have size 13x13x5=845, total number of bboxes.
                                                 // for each one there are 2 different pointers to: bbox(5) and classes(80)
-            float scale = EXPIT(yolo_output[obj_index]);
+            float scale = EXPIT(nn->output[obj_index]);
 
-            for(j = 0; j < NY2_CLASSES; ++j){
-                dets[det_index].prob[j] = 0;
+            for(j = 0; j < nn->nclasses; ++j){
+                nn->dets[det_index].prob[j] = 0;
             }
 
-            dets[det_index].bbox = get_region_box(yolo_output, n, box_index, i / NY2_OUT_W, i % NY2_OUT_W);
+            nn->dets[det_index].bbox = get_region_box(nn->output, n, box_index, i / nn->out_w, i % nn->out_w);
 
             
-            if(scale > thresh) {
-                dets[det_index].objectness = scale;
+            if(scale > nn->thresh) {
+                nn->dets[det_index].objectness = scale;
 
                 /** SOFTMAX **/
-                float *pclasses = yolo_output + b + 5;
+                float *pclasses = nn->output + b + 5;
                 float sum = 0;
                 float largest = -FLT_MAX;
                 int k;
-                int n0_classes = NY2_CLASSES - 1;
+                int n0_classes = nn->nclasses - 1;
                 for(k = n0_classes; k >= 0; --k){
                     if(pclasses[k] > largest) largest = pclasses[k];
                 }
@@ -195,7 +189,7 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
                 }
                 for(k = n0_classes; k >= 0; --k){
                     float prob = scale * pclasses[k] / sum;
-                    dets[det_index].prob[k] = (prob > thresh) ? prob : 0;
+                    nn->dets[det_index].prob[k] = (prob > nn->thresh) ? prob : 0;
                 }
                 /** SOFTMAX **/
             }
@@ -203,69 +197,39 @@ int get_rec_objects(rec_object *robj, float thresh, int imw, int imh)
         }
     }
 
-    correct_region_boxes(imw, imh);
+    correct_region_boxes();
 
     do_nms_sort();
 
     nbbox = 0;
-    for(int n = 0; n < NY2_B_CELL; n++) {
-        for(int k = 0; k < NY2_CLASSES; k++) {
-            if (dets[n].prob[k] > .5){
-                detection d = dets[n];
-                rec_object *d2 = &robj[nbbox];
-                box b = d.bbox;
+    for(int n = 0; n < nn->nbbox; n++) {
+        for(int k = 0; k < nn->nclasses; k++) {
+            if (nn->dets[n].prob[k] > .5){
+
+                detection d = nn->dets[n];
+
+                bbox *_bbox = &nn->bboxes[nbbox];
 
                 // printf("\n\n%2d|%2d\t%7.6f\t", n, k, d.prob[k]);
                 // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\t\t%s\n", b.x, b.y, b.w, b.h, c);
 
-                memcpy(&(d2->bbox), &(b), 16);  //BBOX
-                d2->objectness = d.objectness;  //OBJ
-                d2->prob = d.prob[k];           //Classness
-                d2->cindex = k;                 //class-index
-                if(++nbbox == 5) return nbbox;
+                memcpy(&(_bbox->box), &(d.bbox), 16);  //BBOX
+                _bbox->objectness = d.objectness;  //OBJ
+                _bbox->prob = d.prob[k];           //Classness
+                _bbox->cindex = k;                 //class-index
+
+                if(++nbbox == nbboxes_max) return nbbox;
             }
         }
     }
     return nbbox;
 }
 
-
-int ny2_init (const char* graph) {
-    
-    int b = 0;
-    int i = -1;
-    int j = -1;
-    
-    while(++i < 625) {
-        if(ny2_categories[i] == '\0') {
-            ny2_names[++j] = b;
-            b = i + 1;
-        }
-    }
-
-    ny2_input = calloc(NY2_INPUT_SIZE, sizeof(float));
-    yolo_output = calloc(NY2_OUTPUT_SIZE, sizeof(float));
-
-
-    dets = (detection*) calloc(NY2_B_TOTAL, sizeof(detection));
-    for(int i = NY2_B_TOTAL-1; i >= 0; --i){
-        dets[i].prob = (float*) calloc(NY2_CLASSES, sizeof(float));
-    }
-
-#ifdef NCS
-    if(ncs_init()) return -1;
-
-    if(ncs_load_nn(graph, "yolov2")) return -1;
-#endif
-    return 0;
-}
-
-
-int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int const imw, int const imh, int const imc) {
+int ny2_inference_byte(unsigned char *image, int nbboxes_max) {
 	int i = 0;
-    int letterbox = imc * imw * ((NY2_INPUT_W - imh) >> 1);
-    int l = imw*imh*imc;
-	float *y = &ny2_input[letterbox];
+    int letterbox = nn->in_c * nn->in_w * ((nn->in_h - nn->im_rows) >> 1);
+    int l = nn->im_rows * nn->im_cols * nn->in_c;
+	float *y = &nn->input[letterbox];
 	while(i <= l-3) {
 		y[i] = image[i + 2] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
 		y[i] = image[i] / 255.;     ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
@@ -273,49 +237,31 @@ int ny2_inference_byte(unsigned char *image, rec_object *robj, float thresh, int
 	}
 
 #ifdef OPENCV
-    IplImage *iplim = cvCreateImage(cvSize(NY2_INPUT_W, NY2_INPUT_H), IPL_DEPTH_32F, 3);
-    memcpy(iplim->imageData, ny2_input, NY2_INPUT_SIZE*4);
+    IplImage *iplim = cvCreateImage(cvSize(nn->in_w, nn->in_h), IPL_DEPTH_32F, 3);
+    memcpy(iplim->imageData, nn->input, nn->input_size_byte*4);
     cvShowImage("bibo2", iplim);
     cvUpdateWindow("bibo2");
     cvReleaseImage(&iplim);
     // cvWaitKey(0);
 #endif
-    return ny2_inference(robj, thresh, imw, imh);
+
+    return ny2_inference(nbboxes_max);
 }
 
 /**
  * @return -1 if error; 0 if no bbox has found; x>0 if it found x bbox.
  * */ 
-int ny2_inference(rec_object *robj, float thresh, const int imw, const int imh) {
+int ny2_inference(int nbboxes_max) {
 
-#ifdef NCS
-    if(ncs_inference(ny2_input, (NY2_INPUT_SIZE) << 2, yolo_output, (NY2_OUTPUT_SIZE) << 2)) return -1;
-#else
+#ifdef NOMOVIDIUS
     int i = -1;
     char s[20] = {0};
     FILE*f = fopen("out.txt", "r");
     while (fgets(s, 20, f) != NULL) {
-       yolo_output[++i] = atof(s);
+       nn->output[++i] = atof(s);
     }
     fclose(f);
 #endif
 
-    return get_rec_objects(robj, thresh, imw, imh);
-
-    
-    // c = clock() - c;
-    // printf("\n-->took %f seconds to execute \n", ((double) (c)) / CLOCKS_PER_SEC); 
-}
-
-
-void ny2_destroy() {
-#ifdef NCS
-    ncs_destroy();
-#endif
-    for(int i = NY2_B_TOTAL-1; i >= 0; --i){
-        free(dets[i].prob);
-    }
-    free(yolo_output);
-    free(ny2_input);
-    free(dets);
+    return get_bboxes(nbboxes_max);
 }
