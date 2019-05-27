@@ -161,7 +161,7 @@ int parse_meta_file(const char *meta) {
     printf("\t%20s:\t%f\n", "thresh", nn->thresh);
     printf("\t%20s:\t[ %d, %d, %d]\n", "input", nn->in_w, nn->in_h, nn->in_c);
     printf("\t%20s:\t[ %d, %d ]\n", "image", nn->im_cols, nn->im_rows);
-    printf("\t%20s:\t[ %d, %d ]\n", "output", nn->out_w, nn->out_h, nn->out_z);
+    printf("\t%20s:\t[ %d, %d, %d ]\n", "output", nn->out_w, nn->out_h, nn->out_z);
     printf("\t%20s:\t%d\n", "nbbox", nn->nbbox);
     printf("\t%20s:\t%d\n", "nbbox_total", nn->nbbox_total);
     printf("\t%20s:\t%d\n", "ncoords", nn->ncoords);
@@ -239,7 +239,6 @@ int ncs_init(const char *graph, const char *meta, NCSNNType nntype, nnet *_nn) {
 
     if(parse_meta_file(meta))
         return -1;
-
 
     switch(nntype) {
         case NCSNN_YOLOv2:

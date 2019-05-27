@@ -151,13 +151,7 @@ box get_region_box(float *x, int n, int index, int i, int j)
 
 int get_bboxes(int nbboxes_max)
 {
-    FILE*f = fopen("holooj-output.txt", "w");
-    for(int z = 0; z < (nn->output_size_byte >> 2); z++) {
-        fprintf(f, "%f\n", nn->output[z]);
-    }
-    fclose(f);
-
-    int i,j,n, nbbox;
+    int i,j,n;
     int wh = nn->out_w * nn->out_h;
     int b = 0;
     for (i = 0; i < wh; ++i){
@@ -174,7 +168,6 @@ int get_bboxes(int nbboxes_max)
             }
 
             nn->dets[det_index].bbox = get_region_box(nn->output, n, box_index, i / nn->out_w, i % nn->out_w);
-
             
             if(scale > nn->thresh) {
                 nn->dets[det_index].objectness = scale;
@@ -207,23 +200,13 @@ int get_bboxes(int nbboxes_max)
 
     do_nms_sort();
 
-    f = fopen("/home/developer/holooj-dects.txt", "w");
-    nbbox = 0;
+    int nbbox = 0;
     for(int n = 0; n < nn->nbbox_total; n++) {
-        fprintf(f, "%f\n", nn->dets[n].objectness);
-        fprintf(f, "%f\n", nn->dets[n].prob);
-        fprintf(f, "%f\n", nn->dets[n].bbox.x);
-        fprintf(f, "%f\n", nn->dets[n].bbox.y);
-        fprintf(f, "%f\n", nn->dets[n].bbox.w);
-        fprintf(f, "%f\n", nn->dets[n].bbox.h);
         for(int k = 0; k < nn->nclasses; k++) {
             if (nn->dets[n].prob[k] > .5) {
                 detection d = nn->dets[n];
 
                 bbox *_bbox = &nn->bboxes[nbbox];
-
-                // printf("\n\n%2d|%2d\t%7.6f\t", n, k, d.prob[k]);
-                // printf("(%7.6f, %7.6f, %7.6f, %7.6f)\t\t%s\n", b.x, b.y, b.w, b.h, c);
 
                 memcpy(&(_bbox->box), &(d.bbox), 16);  //BBOX
                 _bbox->objectness = d.objectness;  //OBJ
@@ -234,7 +217,6 @@ int get_bboxes(int nbboxes_max)
             }
         }
     }
-    fclose(f);
     return nbbox;
 }
 

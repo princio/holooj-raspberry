@@ -246,34 +246,42 @@ int elaborate_image(byte *imbuffer, int iml, int index) {
 
 int recv_config() {
 	int ret;
-    int c;
-    int cl = 12;
-    byte cbuf[cl];
 
 	ret = socket_recv((byte *) &config, sizeof(Config), 0);//REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
-	// ret = socket_recv((byte*) &config, sizeof(Config), 0);//REMEMBER ALIGNMENT! char[6] equal to char[8] because of it.
 	
 	REPORT_ERRNO(ret < 0, -1, "");
 	REPORT(ret == 0, -1, "No config received");
 
-	// printf("%d\t%dx%d, %s\n", config.STX, config.rows, config.cols, config.isBMP ? "BMP" : "JPEG");
+	nn->im_cols = config.cols;
+	nn->im_rows = config.rows;
 
 	buffer_size = (OH_SIZE + config.rows * config.cols * 3) >> (config.isBMP ? 0 : 4);
 	image_size = config.rows * config.cols * 3;
 
-	// printf("Buffer size set to %d.\n", buffer_size);
 
-    c = nn->nclasses;
-    cl = sizeof(nn->classes);
-    memcpy(cbuf,		&config.STX, 	4);
-    memcpy(cbuf + 4,	&cl, 			4);
-    memcpy(cbuf + 8,	&c, 	4);
+	int l_tot_byte = 0;
+	for(int i = 0; i < nn->nclasses; i++) {
+		l_tot_byte += strlen(nn->classes[i]) + 1;
+	}
 
-    ret = socket_send(cbuf, 12, 0);
+	char cls[12 + l_tot_byte];
+	int cls_p = 12;
+	for(int i = 0; i < nn->nclasses; i++) {
+		int sl = strlen(nn->classes[i]);
+		memcpy(cls + cls_p, nn->classes[i], sl);
+		cls[cls_p + sl] = '\0';
+		cls_p += sl + 1;
+	}
+
+    memcpy(cls,		&config.STX, 	4);
+    memcpy(cls + 4,	&l_tot_byte, 			4);
+    memcpy(cls + 8,	&nn->nclasses, 			4);
+
+    ret = socket_send((byte *) cls, 12, 0);
 	REPORT_ERRNO(ret < 0, -1, "");
 
-	nn->im_cols = config.cols;
-	nn->im_rows = config.rows;
+    ret = socket_send((byte *) cls + 12, l_tot_byte, 0);
+	REPORT_ERRNO(ret < 0, -1, "");
 
 	return ret;
 }
@@ -319,6 +327,8 @@ int run(const char *iface, const char *graph, const char *meta, int port) {
 	printf("\nNCS initialization...");
 	if(ncs_init(graph, meta, NCSNN_YOLOv2, nn)) exit(1);
 	printf("OK\n");
+
+
 
 	printf("\nSocket is starting...");
 	if(socket_start_server(iface, port)) exit(1);
@@ -379,6 +389,7 @@ int main (int argc, char** argv) {
 	r = rand() % 1000;
 	port = r + 50000;
 
+	port = 56789;
 
 	if(argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
 		printf("HoloOj for Raspberry.\n\t--graph\t\t\tthe path to the graph file.\n\t--meta\t\t\tthe path to the meta file.\n\t--iface\t\t\tthe network interface to use.\n\t--help, -h\t\tthis help.\n");

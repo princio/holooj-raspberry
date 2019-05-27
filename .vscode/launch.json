@@ -9,12 +9,12 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/debug/gengi",
-            "args": [
-                "--meta",
-                "./yolov2/yolov2-tiny-ale.meta",
-                "--graph",
-                "./yolov2/yolov2-tiny-ale.graph"
-            ],
+            // "args": [
+            //     "--meta",
+            //     "./yolov2/yolov2-tiny-ale.meta",
+            //     "--graph",
+            //     "./yolov2/yolov2-tiny-ale.graph"
+            // ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
 
