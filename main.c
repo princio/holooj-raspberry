@@ -199,9 +199,7 @@ int elaborate_image(byte *imbuffer, int iml, int index) {
         im = imbuffer;
     }
 
-	nn->input = (float *) im;
-
-	nbbox = ncs_inference(3);
+	nbbox = ncs_inference_byte(imbuffer, 3);
 
     //byte color[3] = {250, 0, 0};
 	for(int i = nbbox-1; i >= 0; --i) {
@@ -302,7 +300,6 @@ int run(const char *iface, const char *graph, const char *meta, int port) {
 
 	printf("\nNCS initialization...");
 	if(ncs_init(graph, meta, NCSNN_YOLOv2, nn)) exit(1);
-	nn = calloc(1, sizeof(nnet));
 	printf("OK\n");
 
 	printf("\nSocket is starting...");

@@ -70,6 +70,7 @@ typedef struct nnet {
 
 int ncs_init(const char*, const char*, NCSNNType, nnet *nn);
 
+int ncs_inference_byte(unsigned char *image, int nbboxes_max);
 int ncs_inference(int nbboxes_max);
 
 int ncs_destroy();

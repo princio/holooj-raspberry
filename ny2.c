@@ -202,9 +202,10 @@ int get_bboxes(int nbboxes_max)
     do_nms_sort();
 
     nbbox = 0;
-    for(int n = 0; n < nn->nbbox; n++) {
+    for(int n = 0; n < nn->nbbox_total; n++) {
         for(int k = 0; k < nn->nclasses; k++) {
             if (nn->dets[n].prob[k] > .5){
+                printf("%f\n", nn->dets[n].prob[k]);
 
                 detection d = nn->dets[n];
 
@@ -223,29 +224,6 @@ int get_bboxes(int nbboxes_max)
         }
     }
     return nbbox;
-}
-
-int ny2_inference_byte(unsigned char *image, int nbboxes_max) {
-	int i = 0;
-    int letterbox = nn->in_c * nn->in_w * ((nn->in_h - nn->im_rows) >> 1);
-    int l = nn->im_rows * nn->im_cols * nn->in_c;
-	float *y = &nn->input[letterbox];
-	while(i <= l-3) {
-		y[i] = image[i + 2] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
-		y[i] = image[i] / 255.;     ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
-		y[i] = image[i - 2] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
-	}
-
-#ifdef OPENCV
-    IplImage *iplim = cvCreateImage(cvSize(nn->in_w, nn->in_h), IPL_DEPTH_32F, 3);
-    memcpy(iplim->imageData, nn->input, nn->input_size_byte*4);
-    cvShowImage("bibo2", iplim);
-    cvUpdateWindow("bibo2");
-    cvReleaseImage(&iplim);
-    // cvWaitKey(0);
-#endif
-
-    return ny2_inference(nbboxes_max);
 }
 
 /**

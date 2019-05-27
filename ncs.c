@@ -149,7 +149,7 @@ int parse_meta_file(const char *meta) {
             nn->in_w, nn->in_h, nn->in_c, nn->out_w, nn->out_h, nn->out_z, nn->nbbox, nn->ncoords);
 
     nn->nbbox_total = nn->out_w * nn->out_h * nn->nbbox;
-    nn->input_size_byte = nn->in_w * nn->in_h * nn->in_c;
+    nn->input_size_byte = 4 * nn->in_w * nn->in_h * nn->in_c;
     nn->output_size_byte = 4 * nn->out_w * nn->out_h * nn->nbbox * (nn->ncoords + 1 + nn->nclasses);
     printf("\n\t input size: %d\n\toutput_size: %d\n\nnbbox total: %d\n\n",
             nn->input_size_byte, nn->output_size_byte, nn->nbbox_total);
@@ -257,6 +257,35 @@ int ncs_init(const char *graph, const char *meta, NCSNNType nntype, nnet *_nn) {
     return 0;
 }
 
+
+int ncs_inference_byte(unsigned char *image, int nbboxes_max) {
+	int i = 0;
+    int letterbox = nn->in_c * nn->in_w * ((nn->in_h - nn->im_rows) >> 1);
+    int l = nn->im_rows * nn->im_cols * nn->in_c;
+	float *y = &nn->input[letterbox];
+	while(i <= l-3) {
+		y[i] = image[i + 2] / 255.; ++i;    // X[i] = imbuffer[i+2] / 255.; ++i;
+		y[i] = image[i] / 255.;     ++i;    // X[i] = imbuffer[i] / 255.;   ++i;
+		y[i] = image[i - 2] / 255.; ++i;    // X[i] = imbuffer[i-2] / 255.; ++i;
+	}
+
+#ifdef OPENCV
+    IplImage *iplim = cvCreateImage(cvSize(nn->in_w, nn->in_h), IPL_DEPTH_32F, 3);
+    memcpy(iplim->imageData, nn->input, nn->input_size_byte*4);
+    cvShowImage("bibo2", iplim);
+    cvUpdateWindow("bibo2");
+    cvReleaseImage(&iplim);
+    // cvWaitKey(0);
+#endif
+
+    int nbbox = ncs_inference(nbboxes_max);
+    
+    if(nbbox < 0) return -1;
+
+    return nbbox;
+}
+
+
 int ncs_inference(int nbboxes_max) {
 
     unsigned int length_bytes;
@@ -276,13 +305,14 @@ int ncs_inference(int nbboxes_max) {
     retCode = ncFifoReadElem(fifo_out, nn->output, &length_bytes, NULL);
     REPORT(retCode, NCSFifoReadError, "recode=%d", retCode);
 
+    int nbbox = -1;
     switch(nn->type) {
         case NCSNN_YOLOv2:
-            if(ny2_inference(nbboxes_max)) return -1;
+            nbbox = ny2_inference(nbboxes_max);
+            if(nbbox < 0) return -1;
         break;
     }
-
-    return 0;
+    return nbbox;
 }
 
 int ncs_destroy() {
