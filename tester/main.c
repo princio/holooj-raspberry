@@ -56,7 +56,7 @@ int socket_wait_data(int is_recv) {
 int load_image() {
     int lr;
     char fpath[100];
-	strcpy(fpath, "/home/developer/dog_resized.jpg");
+	strcpy(fpath, "/home/developer/fe.jpg");
 	printf("\n Elaborating --> %s...\n\n", fpath);
 
 	IplImage *mat = cvLoadImage(fpath, CV_LOAD_IMAGE_COLOR);

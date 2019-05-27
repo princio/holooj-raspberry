@@ -150,17 +150,35 @@ void draw_bbox(byte *im, box b, byte color[3]) {
     for(int k = left_col; k < right_col; k+=3) {
         for(int wh = 0; wh <= thickness; wh++) {
             int border_line = wh*w*3;
+
+			int a = k + top_row + border_line;
+			int b = k + bot_row + border_line;
+
             memcpy(&im[k + top_row - border_line], color, 3);
-			//TODO invalid write of size 1 vvvv
-            memcpy(&im[k + bot_row + border_line], color, 3);
+            memcpy(&im[k + bot_row + border_line], color, 3); 
+
+			if(a < 0 || a > config.cols*config.rows*3) {
+				printf("a: %d", a);
+			}
+			if(b < 0 || b > config.cols*config.rows*3) {
+				printf("b: %d", b);
+			}
         }
     }
 	int pixel_left = top*3*w + left_col;
 	int pixel_right = top*3*w + right_col;
     for(int k = top; k < bot; k++) {
         for(int wh = 0; wh <= thickness*3; wh+=3) {
+			int c = pixel_left  - wh;
+			int d = pixel_right + wh;
             memcpy(&im[pixel_left  - wh], color, 3);
             memcpy(&im[pixel_right + wh], color, 3);
+			if(c < 0 || c > config.cols*config.rows*3) {
+				printf("c: %d", c);
+			}
+			if(d < 0 || d > config.cols*config.rows*3) {
+				printf("d: %d", d);
+			}
         }
 		pixel_left += 3*w;
 		pixel_right += 3*w;
@@ -201,12 +219,12 @@ int elaborate_image(byte *imbuffer, int iml, int index) {
 
 	nbbox = ncs_inference_byte(imbuffer, 3);
 
-    //byte color[3] = {250, 0, 0};
+    byte color[3] = {250, 0, 0};
 	for(int i = nbbox-1; i >= 0; --i) {
 		printf("\t(%7.6f, %7.6f, %7.6f, %7.6f), o=%7.6f, p=%7.6f:\t\t%s\n",
 			nn->bboxes[i].box.x, nn->bboxes[i].box.y, nn->bboxes[i].box.w, nn->bboxes[i].box.h, nn->bboxes[i].objectness, nn->bboxes[i].prob, nn->classes[nn->bboxes[i].cindex]);
 
-		//draw_bbox(im, robj[i].box, color);
+		draw_bbox(im, nn->bboxes[i].box, color);
 	}
 
 	if(nbbox >= 0) {
@@ -363,7 +381,7 @@ int main (int argc, char** argv) {
 
 
 	if(argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
-		printf("HoloOj for Raspberry.\n\t--graph\t\t\tthe path to the graph.\n\t--iface\t\t\tthe network interface to use.\n\t--help, -h\t\tthis help.\n");
+		printf("HoloOj for Raspberry.\n\t--graph\t\t\tthe path to the graph file.\n\t--meta\t\t\tthe path to the meta file.\n\t--iface\t\t\tthe network interface to use.\n\t--help, -h\t\tthis help.\n");
 		exit(0);
 	}
 

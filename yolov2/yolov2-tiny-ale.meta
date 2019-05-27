@@ -1,1 +1,6 @@
 {"class_scale": 1, "random": 1, "absolute": 1, "model": "yolov2-tiny-ale.cfg", "object_scale": 5, "labels": ["fire extinguisher"], "coord_scale": 1, "net": {"angle": 0, "type": "[net]", "decay": 0.0005, "height": 416, "subdivisions": 4, "learning_rate": 0.001, "burn_in": 1000, "momentum": 0.9, "policy": "steps", "batch": 64, "saturation": 1.5, "steps": "400000,450000", "width": 416, "max_batches": 500200, "exposure": 1.5, "hue": 0.1, "scales": ".1,.1", "channels": 3}, "classes": 1, "anchors": [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828], "colors": [[254.0, 254.0, 254]], "inp_size": [416, 416, 3], "softmax": 1, "bias_match": 1, "type": "[region]", "out_size": [13, 13, 30], "jitter": 0.2, "noobject_scale": 1, "coords": 4, "rescore": 0, "name": "yolov2-tiny-ale", "thresh": 0.6, "num": 5}
+
+
+0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828
+
+0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052,

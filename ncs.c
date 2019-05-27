@@ -118,7 +118,7 @@ int parse_meta_file(const char *meta) {
         pch = strtok(NULL, "\"");
     }
 
-    nn->nanchors = 0;
+    nn->nanchors = 1;
     pch = strpbrk (anchors_text, ",");
     while (pch != NULL)
     {
@@ -155,6 +155,20 @@ int parse_meta_file(const char *meta) {
             nn->input_size_byte, nn->output_size_byte, nn->nbbox_total);
 
     free(buf);
+
+    printf("NN:\n");
+    printf("\t%20s:\t%s\n", "name", nn->name);
+    printf("\t%20s:\t%f\n", "thresh", nn->thresh);
+    printf("\t%20s:\t[ %d, %d, %d]\n", "input", nn->in_w, nn->in_h, nn->in_c);
+    printf("\t%20s:\t[ %d, %d ]\n", "image", nn->im_cols, nn->im_rows);
+    printf("\t%20s:\t[ %d, %d ]\n", "output", nn->out_w, nn->out_h, nn->out_z);
+    printf("\t%20s:\t%d\n", "nbbox", nn->nbbox);
+    printf("\t%20s:\t%d\n", "nbbox_total", nn->nbbox_total);
+    printf("\t%20s:\t%d\n", "ncoords", nn->ncoords);
+    printf("\t%20s:\t%d\n", "nclasses", nn->nclasses);
+    printf("\t%20s:\t%d\n", "nanchors", nn->nanchors);
+    printf("\t%20s:\t%d\n", "input_size_byte", nn->input_size_byte);
+    printf("\t%20s:\t%d\n", "output_size_byte", nn->output_size_byte);
 
     return 0;
 }
